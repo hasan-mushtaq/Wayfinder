@@ -28,7 +28,7 @@ export default function App() {
 
   // Initialize Map
   useEffect(() => {
-    window.initMap = () => {
+    window.initMap = async () => {
       const center = { lat: 37.329, lng: -121.888 };
       const mapOptions = {
         zoom: 18,
@@ -45,14 +45,64 @@ export default function App() {
       };
       
       if (window.google) {
-        mapRef.current = new window.google.maps.Map(document.getElementById('map'), mapOptions);
+        const map = new window.google.maps.Map(document.getElementById('map'), mapOptions);
+        mapRef.current = map;
         
         // Add a marker for the museum
         new window.google.maps.Marker({
           position: center,
-          map: mapRef.current,
-          title: "Dinoseum Main Entrance"
+          map: map,
+          title: "Wayfinder Main Entrance"
         });
+
+        // --- Fetch and Load Spanner Data ---
+        try {
+          const response = await fetch('/api/map-nodes');
+          if (!response.ok) throw new Error('Failed to fetch map nodes');
+          const geoJsonData = await response.json();
+          
+          // Add GeoJSON data to map
+          map.data.addGeoJson(geoJsonData);
+          
+          // Style the GeoJSON features
+          map.data.setStyle((feature: any) => {
+            const category = feature.getProperty('category');
+            let color = '#007aff';
+            if (category === 'exhibit') color = '#ff3b30';
+            if (category === 'facility') color = '#34c759';
+            
+            return {
+              fillColor: color,
+              strokeColor: color,
+              strokeWeight: 2,
+              icon: {
+                path: window.google.maps.SymbolPath.CIRCLE,
+                scale: 6,
+                fillColor: color,
+                fillOpacity: 0.8,
+                strokeWeight: 1
+              }
+            };
+          });
+
+          // Show info window on click
+          const infoWindow = new window.google.maps.InfoWindow();
+          map.data.addListener('click', (event: any) => {
+            const name = event.feature.getProperty('name');
+            const category = event.feature.getProperty('category');
+            infoWindow.setContent(`
+              <div style="padding: 8px;">
+                <h3 style="margin: 0 0 4px 0; font-size: 14px;">${name}</h3>
+                <p style="margin: 0; font-size: 12px; color: #666;">Category: ${category}</p>
+              </div>
+            `);
+            infoWindow.setPosition(event.latLng);
+            infoWindow.open(map);
+          });
+
+        } catch (error) {
+          console.error("Error loading map nodes:", error);
+        }
       }
     };
 
