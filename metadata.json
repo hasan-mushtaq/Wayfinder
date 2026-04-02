@@ -1,0 +1,5 @@
+{
+  "name": "Wayfinder",
+  "description": "An AI-powered indoor navigation digital twin for museum exploration.",
+  "requestFramePermissions": ["geolocation"]
+}
