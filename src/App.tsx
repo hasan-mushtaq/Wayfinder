@@ -67,6 +67,22 @@ export default function App() {
           // Add GeoJSON data to map
           map.data.addGeoJson(data);
 
+          // Fit map to bounds of the features
+          const bounds = new window.google.maps.LatLngBounds();
+          map.data.forEach((feature: any) => {
+            const geometry = feature.getGeometry();
+            if (geometry.getType() === 'Point') {
+              bounds.extend(geometry.get());
+            } else {
+              geometry.forEachLatLng((latLng: any) => {
+                bounds.extend(latLng);
+              });
+            }
+          });
+          if (!bounds.isEmpty()) {
+            map.fitBounds(bounds);
+          }
+
           // If mock data is used, notify the user
           if (data.source === 'mock') {
             setMessages(prev => {
@@ -83,14 +99,19 @@ export default function App() {
           // Style the GeoJSON features
           map.data.setStyle((feature: any) => {
             const category = feature.getProperty('category');
-            let color = '#007aff';
-            if (category === 'exhibit') color = '#ff3b30';
-            if (category === 'facility') color = '#34c759';
+            const nodeType = feature.getProperty('node_type');
+            
+            let color = '#007aff'; // Default blue
+            if (category === 'exhibit') color = '#ff3b30'; // Red
+            if (category === 'facility') color = '#34c759'; // Green
+            if (nodeType === 'unit') color = '#5856d6'; // Purple
+            if (nodeType === 'room') color = '#ff9500'; // Orange
             
             return {
               fillColor: color,
               strokeColor: color,
               strokeWeight: 2,
+              fillOpacity: 0.3,
               icon: {
                 path: window.google.maps.SymbolPath.CIRCLE,
                 scale: 6,
@@ -106,10 +127,26 @@ export default function App() {
           map.data.addListener('click', (event: any) => {
             const name = event.feature.getProperty('name');
             const category = event.feature.getProperty('category');
+            const nodeType = event.feature.getProperty('node_type');
+            const venue = event.feature.getProperty('venue_name');
+            const floor = event.feature.getProperty('floor_number');
+            const level = event.feature.getProperty('level_name');
+            const searchContext = event.feature.getProperty('search_context');
+            
             infoWindow.setContent(`
-              <div style="padding: 8px;">
-                <h3 style="margin: 0 0 4px 0; font-size: 14px;">${name}</h3>
-                <p style="margin: 0; font-size: 12px; color: #666;">Category: ${category}</p>
+              <div style="padding: 12px; font-family: sans-serif; max-width: 250px;">
+                <h3 style="margin: 0 0 8px 0; font-size: 16px; color: #1a1a1a;">${name || 'Unnamed Node'}</h3>
+                <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;">
+                  <span style="background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: #666;">${category || 'No Category'}</span>
+                  <span style="background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: #666;">${nodeType || 'No Type'}</span>
+                </div>
+                <div style="font-size: 13px; color: #444; margin-bottom: 4px;">
+                  <strong>Venue:</strong> ${venue || 'N/A'}
+                </div>
+                <div style="font-size: 13px; color: #444; margin-bottom: 4px;">
+                  <strong>Floor:</strong> ${floor || 'N/A'} (${level || 'N/A'})
+                </div>
+                ${searchContext ? `<div style="font-size: 12px; color: #888; margin-top: 8px; font-style: italic;">${searchContext}</div>` : ''}
               </div>
             `);
             infoWindow.setPosition(event.latLng);

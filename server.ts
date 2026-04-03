@@ -89,8 +89,17 @@ async function startServer() {
         sql: `
           SELECT 
             node_id, 
-            name, 
+            node_type,
             category, 
+            name, 
+            level_name, 
+            floor_number, 
+            building_name, 
+            venue_name, 
+            occupant_names, 
+            occupant_categories, 
+            hours, 
+            search_context, 
             geom as geom_wkt
           FROM Map_Nodes
           WHERE floor_number = '1'
@@ -110,8 +119,17 @@ async function startServer() {
           geometry: geometry,
           properties: {
             node_id: spannerRow.node_id,
+            node_type: spannerRow.node_type || "",
+            category: spannerRow.category || "",
             name: spannerRow.name || "",
-            category: spannerRow.category || "unknown",
+            level_name: spannerRow.level_name || "",
+            floor_number: spannerRow.floor_number || "",
+            building_name: spannerRow.building_name || "",
+            venue_name: spannerRow.venue_name || "",
+            occupant_names: spannerRow.occupant_names || "",
+            occupant_categories: spannerRow.occupant_categories || "",
+            hours: spannerRow.hours || "",
+            search_context: spannerRow.search_context || "",
           },
         };
       });
