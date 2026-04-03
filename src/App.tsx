@@ -126,6 +126,7 @@ export default function App() {
           const infoWindow = new window.google.maps.InfoWindow();
           map.data.addListener('click', (event: any) => {
             const name = event.feature.getProperty('name');
+            const originalName = event.feature.getProperty('original_name');
             const category = event.feature.getProperty('category');
             const nodeType = event.feature.getProperty('node_type');
             const venue = event.feature.getProperty('venue_name');
@@ -133,12 +134,16 @@ export default function App() {
             const level = event.feature.getProperty('level_name');
             const searchContext = event.feature.getProperty('search_context');
             
+            const title = name || originalName || 'Unnamed Node';
+            const subtitle = (originalName && originalName !== name) ? `<div style="font-size: 12px; color: #666; margin-bottom: 4px;">(${originalName})</div>` : '';
+
             infoWindow.setContent(`
               <div style="padding: 12px; font-family: sans-serif; max-width: 250px;">
-                <h3 style="margin: 0 0 8px 0; font-size: 16px; color: #1a1a1a;">${name || 'Unnamed Node'}</h3>
+                <h3 style="margin: 0 0 4px 0; font-size: 16px; color: #1a1a1a;">${title}</h3>
+                ${subtitle}
                 <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;">
-                  <span style="background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: #666;">${category || 'No Category'}</span>
-                  <span style="background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: #666;">${nodeType || 'No Type'}</span>
+                  <span style="background: #e3f2fd; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: #1976d2; font-weight: 500;">${category || 'No Category'}</span>
+                  <span style="background: #f5f5f5; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: #616161;">${nodeType || 'No Type'}</span>
                 </div>
                 <div style="font-size: 13px; color: #444; margin-bottom: 4px;">
                   <strong>Venue:</strong> ${venue || 'N/A'}
@@ -146,7 +151,7 @@ export default function App() {
                 <div style="font-size: 13px; color: #444; margin-bottom: 4px;">
                   <strong>Floor:</strong> ${floor || 'N/A'} (${level || 'N/A'})
                 </div>
-                ${searchContext ? `<div style="font-size: 12px; color: #888; margin-top: 8px; font-style: italic;">${searchContext}</div>` : ''}
+                ${searchContext ? `<div style="font-size: 12px; color: #888; margin-top: 8px; font-style: italic; border-top: 1px solid #eee; padding-top: 8px;">${searchContext}</div>` : ''}
               </div>
             `);
             infoWindow.setPosition(event.latLng);

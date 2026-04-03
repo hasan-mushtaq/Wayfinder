@@ -85,6 +85,16 @@ async function startServer() {
   // --- API Endpoint: Get Map Nodes ---
   app.get("/api/map-nodes", async (req, res) => {
     try {
+      let tableList: string[] = [];
+      try {
+        const [tables] = await database.run("SELECT table_name FROM information_schema.tables WHERE table_schema = ''");
+        tableList = tables.map((t: any) => t.toJSON().table_name);
+        console.log("Available tables in Spanner:", tableList);
+      } catch (e) {
+        console.warn("Could not list tables:", e);
+      }
+
+      // Fetch from Map_Nodes. 
       const query = {
         sql: `
           SELECT 
@@ -105,15 +115,33 @@ async function startServer() {
           WHERE floor_number = '1'
         `,
       };
-  
 
       const [rows] = await database.run(query);
       
+      // Check if any rows have polygon data
+      const polygonCount = rows.filter((r: any) => {
+        const wkt = r.toJSON().geom_wkt || "";
+        return wkt.startsWith("POLYGON") || wkt.startsWith("MULTIPOLYGON");
+      }).length;
+      console.log(`Found ${rows.length} total nodes, ${polygonCount} are polygons.`);
+
       const features: GeoJSONFeature[] = rows.map((row: any) => {
         const spannerRow = row.toJSON();
         // Parse the WKT (Well-Known Text) into GeoJSON using the wellknown library
         const geometry = spannerRow.geom_wkt ? wellknown.parse(spannerRow.geom_wkt) : null;
         
+        // Improve naming logic: use name, then occupant_names, then category
+        let displayName = (spannerRow.name || "").trim();
+        if (!displayName && spannerRow.occupant_names) displayName = (spannerRow.occupant_names || "").trim();
+        if (!displayName) displayName = (spannerRow.category || "").trim();
+        
+        if (displayName) {
+          // Capitalize first letter
+          displayName = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+        } else {
+          displayName = "Unnamed Node";
+        }
+
         return {
           type: "Feature",
           geometry: geometry,
@@ -121,7 +149,8 @@ async function startServer() {
             node_id: spannerRow.node_id,
             node_type: spannerRow.node_type || "",
             category: spannerRow.category || "",
-            name: spannerRow.name || "",
+            name: displayName,
+            original_name: spannerRow.name || "",
             level_name: spannerRow.level_name || "",
             floor_number: spannerRow.floor_number || "",
             building_name: spannerRow.building_name || "",
@@ -137,7 +166,9 @@ async function startServer() {
       res.json({
         type: "FeatureCollection",
         features: features,
-        source: "spanner"
+        source: "spanner",
+        available_tables: tableList,
+        polygon_count: polygonCount
       });
     } catch (error: any) {
       console.error("Spanner unavailable, falling back to mock data:", error.message);
