@@ -447,8 +447,15 @@ RETURN
               });
 
               if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || 'Routing failed');
+                const errorData = await response.json();
+                const detailsText = `--- GQL QUERY ---\n${gqlQuery}\n\n--- ERROR RESPONSE ---\n${JSON.stringify(errorData, null, 2)}`;
+                setMessages(prev => [...prev, {
+                  id: Date.now().toString(),
+                  text: `❌ Routing failed: ${errorData.error || 'Unknown error'}`,
+                  sender: 'ai',
+                  details: detailsText
+                }]);
+                return;
               }
 
               const data = await response.json();
@@ -488,14 +495,23 @@ RETURN
                 
                 infoWindow.close();
               } else {
-                throw new Error('No coordinates found in route');
+                const detailsText = `--- GQL QUERY ---\n${gqlQuery}\n\n--- GQL RESPONSE ---\n${JSON.stringify(data, null, 2)}`;
+                setMessages(prev => [...prev, {
+                  id: Date.now().toString(),
+                  text: `❌ No route found between these points.`,
+                  sender: 'ai',
+                  details: detailsText
+                }]);
               }
             } catch (err: any) {
               console.error("Routing error:", err);
+              const detailsText = `--- GQL QUERY ---\n${gqlQuery}${err.details ? `\n\n--- ERROR ---\n${err.details}` : ''}`;
+              
               setMessages(prev => [...prev, {
                 id: Date.now().toString(),
                 text: `❌ Could not find a route: ${err.message}`,
-                sender: 'ai'
+                sender: 'ai',
+                details: detailsText
               }]);
             }
           };
