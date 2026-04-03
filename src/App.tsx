@@ -88,9 +88,15 @@ export default function App() {
             setMessages(prev => {
               // Check if the warning already exists to avoid duplicates
               if (prev.some(m => m.id === 'mock-warning-static')) return prev;
+              
+              let warningText = '💡 Note: Using mock map data for this preview because the live Spanner API is restricted in this environment.';
+              if (data.isApiDisabled && data.enableApiUrl) {
+                warningText = `⚠️ Spanner API is disabled. Please enable it here: ${data.enableApiUrl}`;
+              }
+
               return [...prev, {
                 id: 'mock-warning-static',
-                text: '💡 Note: Using mock map data for this preview because the live Spanner API is restricted in this environment. The live connection will work when deployed to your production project.',
+                text: warningText,
                 sender: 'ai'
               }];
             });
@@ -100,21 +106,48 @@ export default function App() {
           map.data.setStyle((feature: any) => {
             const category = feature.getProperty('category');
             const nodeType = feature.getProperty('node_type');
+            const sourceFile = feature.getProperty('source_file');
             
             let color = '#007aff'; // Default blue
-            if (category === 'exhibit') color = '#ff3b30'; // Red
-            if (category === 'facility') color = '#34c759'; // Green
-            if (nodeType === 'unit') color = '#5856d6'; // Purple
-            if (nodeType === 'room') color = '#ff9500'; // Orange
+            let weight = 1;
+            let opacity = 0.2;
+            let visible = true;
+
+            // Styling based on category/type
+            if (category === 'room') { color = '#ff9500'; opacity = 0.4; }
+            else if (category === 'walkway') { color = '#f2f2f7'; opacity = 0.6; }
+            else if (category === 'stairs' || category === 'steps') { color = '#5856d6'; opacity = 0.5; }
+            else if (category === 'elevator') { color = '#af52de'; opacity = 0.6; }
+            else if (category === 'escalator') { color = '#ff2d55'; opacity = 0.6; }
+            else if (category === 'restroom.male' || category === 'restroom.female' || category === 'restroom') { color = '#34c759'; opacity = 0.5; }
+            else if (category === 'parking') { color = '#8e8e93'; opacity = 0.3; }
+            else if (category === 'nonpublic') { color = '#c7c7cc'; opacity = 0.2; }
+            else if (category === 'opentobelow') { color = '#ffffff'; opacity = 0.1; }
             
+            // Styling based on source file
+            if (sourceFile === 'venue.geojson') {
+              color = '#000000';
+              weight = 2;
+              opacity = 0.05;
+            } else if (sourceFile === 'footprint.geojson') {
+              color = '#333333';
+              weight = 1;
+              opacity = 0.1;
+            } else if (sourceFile === 'opening.geojson') {
+              color = '#ff3b30';
+              weight = 3;
+              opacity = 1;
+            }
+
             return {
               fillColor: color,
               strokeColor: color,
-              strokeWeight: 2,
-              fillOpacity: 0.3,
+              strokeWeight: weight,
+              fillOpacity: opacity,
+              visible: visible,
               icon: {
                 path: window.google.maps.SymbolPath.CIRCLE,
-                scale: 6,
+                scale: 4,
                 fillColor: color,
                 fillOpacity: 0.8,
                 strokeWeight: 1
@@ -125,33 +158,25 @@ export default function App() {
           // Show info window on click
           const infoWindow = new window.google.maps.InfoWindow();
           map.data.addListener('click', (event: any) => {
-            const name = event.feature.getProperty('name');
-            const originalName = event.feature.getProperty('original_name');
-            const category = event.feature.getProperty('category');
-            const nodeType = event.feature.getProperty('node_type');
-            const venue = event.feature.getProperty('venue_name');
-            const floor = event.feature.getProperty('floor_number');
-            const level = event.feature.getProperty('level_name');
-            const searchContext = event.feature.getProperty('search_context');
+            const properties = event.feature.getProperties ? event.feature.getProperties() : {};
+            const name = properties.name?.en || properties.name || 'Unnamed Space';
+            const category = properties.category || 'No Category';
+            const nodeType = properties.node_type || 'No Type';
+            const sourceFile = properties.source_file || 'Unknown';
             
-            const title = name || originalName || 'Unnamed Node';
-            const subtitle = (originalName && originalName !== name) ? `<div style="font-size: 12px; color: #666; margin-bottom: 4px;">(${originalName})</div>` : '';
-
             infoWindow.setContent(`
-              <div style="padding: 12px; font-family: sans-serif; max-width: 250px;">
-                <h3 style="margin: 0 0 4px 0; font-size: 16px; color: #1a1a1a;">${title}</h3>
-                ${subtitle}
+              <div style="padding: 12px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 250px;">
+                <h3 style="margin: 0 0 4px 0; font-size: 16px; color: #1c1c1e; font-weight: 600;">${name}</h3>
                 <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;">
-                  <span style="background: #e3f2fd; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: #1976d2; font-weight: 500;">${category || 'No Category'}</span>
-                  <span style="background: #f5f5f5; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: #616161;">${nodeType || 'No Type'}</span>
+                  <span style="background: #e5e5ea; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: #3a3a3c; font-weight: 500;">${category}</span>
+                  <span style="background: #f2f2f7; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: #8e8e93;">${nodeType}</span>
                 </div>
-                <div style="font-size: 13px; color: #444; margin-bottom: 4px;">
-                  <strong>Venue:</strong> ${venue || 'N/A'}
+                <div style="font-size: 13px; color: #3a3a3c; margin-bottom: 4px;">
+                  <strong>Source:</strong> ${sourceFile}
                 </div>
-                <div style="font-size: 13px; color: #444; margin-bottom: 4px;">
-                  <strong>Floor:</strong> ${floor || 'N/A'} (${level || 'N/A'})
+                <div style="font-size: 12px; color: #8e8e93; margin-top: 8px; border-top: 1px solid #e5e5ea; padding-top: 8px;">
+                  ID: ${event.feature.getId() || 'N/A'}
                 </div>
-                ${searchContext ? `<div style="font-size: 12px; color: #888; margin-top: 8px; font-style: italic; border-top: 1px solid #eee; padding-top: 8px;">${searchContext}</div>` : ''}
               </div>
             `);
             infoWindow.setPosition(event.latLng);

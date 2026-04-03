@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { Spanner } from "@google-cloud/spanner";
@@ -43,11 +44,7 @@ interface SpannerRow {
 interface GeoJSONFeature {
   type: "Feature";
   geometry: any;
-  properties: {
-    node_id: string;
-    name: string;
-    category: string;
-  };
+  properties: any;
 }
 
 interface GeoJSONFeatureCollection {
@@ -59,7 +56,7 @@ interface GeoJSONFeatureCollection {
 process.on("unhandledRejection", (reason: any) => {
   // Suppress "Send TimeSeries failed" background errors from Spanner
   if (reason?.message?.includes("Send TimeSeries failed") || reason?.message?.includes("monitoring metric writer permission")) {
-    console.warn("Suppressed background Spanner metrics error:", reason.message);
+    // Silently ignore background metrics errors as they don't affect functionality
     return;
   }
   console.error("Unhandled Rejection:", reason);
@@ -68,7 +65,7 @@ process.on("unhandledRejection", (reason: any) => {
 process.on("uncaughtException", (error: any) => {
   // Suppress "Send TimeSeries failed" background errors from Spanner
   if (error?.message?.includes("Send TimeSeries failed") || error?.message?.includes("monitoring metric writer permission")) {
-    console.warn("Suppressed background Spanner metrics error:", error.message);
+    // Silently ignore background metrics errors as they don't affect functionality
     return;
   }
   console.error("Uncaught Exception:", error);
@@ -85,6 +82,57 @@ async function startServer() {
   // --- API Endpoint: Get Map Nodes ---
   app.get("/api/map-nodes", async (req, res) => {
     try {
+      // 1. Try to load local GeoJSON files first (as requested by user)
+      const geojsonDir = path.join(__dirname, "src", "data", "geojson");
+      const filesToLoad = [
+        "venue.geojson",
+        "footprint.geojson",
+        "level.geojson",
+        "unit.geojson",
+        "opening.geojson",
+        "amenity.geojson",
+        "anchor.geojson"
+      ];
+
+      let combinedFeatures: GeoJSONFeature[] = [];
+      let loadedFiles: string[] = [];
+
+      for (const fileName of filesToLoad) {
+        const filePath = path.join(geojsonDir, fileName);
+        if (fs.existsSync(filePath)) {
+          try {
+            const content = fs.readFileSync(filePath, "utf8");
+            const geojson = JSON.parse(content);
+            if (geojson.features) {
+              // Add source file info to properties
+              const featuresWithSource = geojson.features.map((f: any) => ({
+                ...f,
+                properties: {
+                  ...f.properties,
+                  source_file: fileName,
+                  node_type: f.feature_type || f.properties.feature_type || fileName.split('.')[0]
+                }
+              }));
+              combinedFeatures = [...combinedFeatures, ...featuresWithSource];
+              loadedFiles.push(fileName);
+            }
+          } catch (err) {
+            console.error(`Error parsing ${fileName}:`, err);
+          }
+        }
+      }
+
+      if (combinedFeatures.length > 0) {
+        console.log(`Loaded ${combinedFeatures.length} features from ${loadedFiles.length} local GeoJSON files.`);
+        return res.json({
+          type: "FeatureCollection",
+          features: combinedFeatures,
+          source: "local_geojson",
+          loaded_files: loadedFiles
+        });
+      }
+
+      // 2. Fallback to Spanner if no local files or they are empty
       let tableList: string[] = [];
       try {
         const [tables] = await database.run("SELECT table_name FROM information_schema.tables WHERE table_schema = ''");
@@ -118,25 +166,15 @@ async function startServer() {
 
       const [rows] = await database.run(query);
       
-      // Check if any rows have polygon data
-      const polygonCount = rows.filter((r: any) => {
-        const wkt = r.toJSON().geom_wkt || "";
-        return wkt.startsWith("POLYGON") || wkt.startsWith("MULTIPOLYGON");
-      }).length;
-      console.log(`Found ${rows.length} total nodes, ${polygonCount} are polygons.`);
-
       const features: GeoJSONFeature[] = rows.map((row: any) => {
         const spannerRow = row.toJSON();
-        // Parse the WKT (Well-Known Text) into GeoJSON using the wellknown library
         const geometry = spannerRow.geom_wkt ? wellknown.parse(spannerRow.geom_wkt) : null;
         
-        // Improve naming logic: use name, then occupant_names, then category
         let displayName = (spannerRow.name || "").trim();
         if (!displayName && spannerRow.occupant_names) displayName = (spannerRow.occupant_names || "").trim();
         if (!displayName) displayName = (spannerRow.category || "").trim();
         
         if (displayName) {
-          // Capitalize first letter
           displayName = displayName.charAt(0).toUpperCase() + displayName.slice(1);
         } else {
           displayName = "Unnamed Node";
@@ -167,33 +205,20 @@ async function startServer() {
         type: "FeatureCollection",
         features: features,
         source: "spanner",
-        available_tables: tableList,
-        polygon_count: polygonCount
+        available_tables: tableList
       });
     } catch (error: any) {
-      console.error("Spanner unavailable, falling back to mock data:", error.message);
+      console.error("Error in /api/map-nodes:", error.message);
       
-      // --- Mock Data Fallback for Preview/Testing ---
+      const isApiDisabled = error.message.includes("Cloud Spanner API has not been used") || error.message.includes("PERMISSION_DENIED");
+      const enableApiUrl = isApiDisabled ? `https://console.developers.google.com/apis/api/spanner.googleapis.com/overview?project=274179932022` : null;
+
+      // --- Mock Data Fallback ---
       const mockFeatures: GeoJSONFeature[] = [
         {
           type: "Feature",
           geometry: { type: "Point", coordinates: [-121.888, 37.329] },
           properties: { node_id: "m1", name: "Main Entrance", category: "facility" }
-        },
-        {
-          type: "Feature",
-          geometry: { type: "Point", coordinates: [-121.8885, 37.3295] },
-          properties: { node_id: "e1", name: "T-Rex Exhibit", category: "exhibit" }
-        },
-        {
-          type: "Feature",
-          geometry: { type: "Point", coordinates: [-121.8875, 37.3285] },
-          properties: { node_id: "f1", name: "Cafe & Restrooms", category: "facility" }
-        },
-        {
-          type: "Feature",
-          geometry: { type: "Point", coordinates: [-121.889, 37.330] },
-          properties: { node_id: "e2", name: "Space Gallery", category: "exhibit" }
         }
       ];
 
@@ -201,7 +226,9 @@ async function startServer() {
         type: "FeatureCollection",
         features: mockFeatures,
         source: "mock",
-        warning: "Using mock data because Spanner API is disabled or unreachable in this environment."
+        error: error.message,
+        isApiDisabled,
+        enableApiUrl
       });
     }
   });
@@ -214,11 +241,8 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // Serve static files in production
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    
-    // SPA fallback
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
@@ -233,3 +257,4 @@ startServer().catch((err) => {
   console.error("Failed to start server:", err);
   process.exit(1);
 });
+
