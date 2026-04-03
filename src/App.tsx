@@ -20,6 +20,7 @@ declare global {
   interface Window {
     initMap: () => void;
     google: any;
+    handleNavigate: (destinationId: string, destinationName: string) => void;
   }
 }
 
@@ -29,10 +30,22 @@ export default function App() {
   ]);
   const [inputValue, setInputValue] = useState('');
   const [levels, setLevels] = useState<Level[]>([]);
+  const levelsRef = useRef<Level[]>([]);
+  
+  useEffect(() => {
+    levelsRef.current = levels;
+  }, [levels]);
+
   const [selectedLevelId, setSelectedLevelId] = useState<string | null>(null);
+  const selectedLevelIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    selectedLevelIdRef.current = selectedLevelId;
+  }, [selectedLevelId]);
   const mapRef = useRef<any>(null);
   const entranceMarkerRef = useRef<any>(null);
   const entranceInfoWindowRef = useRef<any>(null);
+  const currentRouteRef = useRef<any>(null);
   const messageEndRef = useRef<HTMLDivElement>(null);
 
   // Scroll to bottom of chat
@@ -285,6 +298,19 @@ export default function App() {
             const categoryProp = feature.getProperty('category');
             const nodeType = feature.getProperty('node_type') || 'No Type';
             const sourceFile = feature.getProperty('source_file') || 'Unknown';
+            const rawLevelId = feature.getProperty('level_id') || (sourceFile === 'level.geojson' ? feature.getId() : null);
+            const levelId = rawLevelId ? rawLevelId.toString() : null;
+
+            // Find level name
+            let level = levelsRef.current.find(l => l.id.toString() === levelId);
+            
+            // Fallback to currently selected level if lookup fails
+            // (Since only features for the selected level are visible)
+            if (!level && selectedLevelIdRef.current) {
+              level = levelsRef.current.find(l => l.id.toString() === selectedLevelIdRef.current?.toString());
+            }
+            
+            const levelName = level ? level.name : 'Unknown Level';
 
             // Handle object-based category
             const category = (typeof categoryProp === 'object' && categoryProp !== null)
@@ -316,6 +342,8 @@ export default function App() {
               }
             }
             
+            const featureId = feature.getId()?.toString();
+            
             infoWindow.setContent(`
               <div style="padding: 12px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 250px;">
                 <h3 style="margin: 0 0 4px 0; font-size: 16px; color: #1c1c1e; font-weight: 600;">${name}</h3>
@@ -324,16 +352,79 @@ export default function App() {
                   <span style="background: #f2f2f7; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: #8e8e93;">${nodeType}</span>
                 </div>
                 <div style="font-size: 13px; color: #3a3a3c; margin-bottom: 4px;">
+                  <strong>Level:</strong> ${levelName}
+                </div>
+                <div style="font-size: 13px; color: #3a3a3c; margin-bottom: 4px;">
                   <strong>Source:</strong> ${sourceFile}
                 </div>
-                <div style="font-size: 12px; color: #8e8e93; margin-top: 8px; border-top: 1px solid #e5e5ea; padding-top: 8px;">
-                  ID: ${feature.getId() || 'N/A'}
+                <div style="font-size: 12px; color: #8e8e93; margin-top: 8px; border-top: 1px solid #e5e5ea; padding-top: 8px; margin-bottom: 12px;">
+                  ID: ${featureId || 'N/A'}
                 </div>
+                ${featureId ? `
+                  <button 
+                    id="nav-btn-${featureId}"
+                    style="width: 100%; background: #007aff; color: white; border: none; padding: 8px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px;"
+                    onclick="window.handleNavigate('${featureId}', '${name.replace(/'/g, "\\'")}')"
+                  >
+                    Navigate here
+                  </button>
+                ` : ''}
               </div>
             `);
             infoWindow.setPosition(event.latLng);
             infoWindow.open(map);
           });
+
+          // Expose handleNavigate to window for the button click
+          window.handleNavigate = async (destinationId: string, destinationName: string) => {
+            const startNodeId = 'b2ff5e53-3ab3-4361-a045-09a5bc45ac53';
+            
+            setMessages(prev => [...prev, {
+              id: Date.now().toString(),
+              text: `Navigating to ${destinationName}...`,
+              sender: 'user'
+            }]);
+
+            try {
+              const response = await fetch('/api/route', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ startNodeId, endNodeId: destinationId })
+              });
+
+              if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Routing failed');
+              }
+
+              const data = await response.json();
+              
+              if (data.coordinates && data.coordinates.length > 0) {
+                // Convert [lng, lat] to {lat, lng} for Google Maps
+                const path = data.coordinates.map((coord: [number, number]) => ({
+                  lat: coord[1],
+                  lng: coord[0]
+                }));
+                
+                drawRouteLine(path);
+                
+                setMessages(prev => [...prev, {
+                  id: Date.now().toString(),
+                  text: `Route found! Follow the blue line on the map. Total steps: ${data.nodes.length}`,
+                  sender: 'ai'
+                }]);
+              } else {
+                throw new Error('No coordinates found in route');
+              }
+            } catch (err: any) {
+              console.error("Routing error:", err);
+              setMessages(prev => [...prev, {
+                id: Date.now().toString(),
+                text: `❌ Could not find a route: ${err.message}`,
+                sender: 'ai'
+              }]);
+            }
+          };
 
         } catch (error: any) {
           console.error("Error loading map nodes:", error);
@@ -387,20 +478,26 @@ export default function App() {
   const drawRouteLine = (coordinates: { lat: number; lng: number }[]) => {
     if (!window.google || !mapRef.current) return;
 
+    // Clear previous route
+    if (currentRouteRef.current) {
+      currentRouteRef.current.setMap(null);
+    }
+
     const routePath = new window.google.maps.Polyline({
       path: coordinates,
       geodesic: true,
-      strokeColor: '#FF0000',
-      strokeOpacity: 1.0,
-      strokeWeight: 4,
+      strokeColor: '#007aff',
+      strokeOpacity: 0.8,
+      strokeWeight: 6,
     });
 
     routePath.setMap(mapRef.current);
+    currentRouteRef.current = routePath;
     
     // Auto-center on the route
     const bounds = new window.google.maps.LatLngBounds();
     coordinates.forEach(coord => bounds.extend(coord));
-    mapRef.current.fitBounds(bounds);
+    mapRef.current.fitBounds(bounds, { padding: 50 });
   };
 
   return (

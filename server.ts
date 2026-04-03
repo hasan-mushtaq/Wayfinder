@@ -267,6 +267,78 @@ async function startServer() {
     }
   });
 
+  // --- API Endpoint: Get Route ---
+  app.post("/api/route", async (req, res) => {
+    const { startNodeId, endNodeId } = req.body;
+
+    if (!startNodeId || !endNodeId) {
+      return res.status(400).json({ error: "startNodeId and endNodeId are required" });
+    }
+
+    try {
+      const query = {
+        sql: `
+          GRAPH indoorRoutingGraph
+          MATCH p = ANY SHORTEST (start_node:Node {
+            node_id: @startNodeId
+          })-[e:connectsTo]->{1, 20} (end_node:Node {
+            node_id: @endNodeId
+          })
+          RETURN
+            SAFE_TO_JSON(NODES(p)) AS route_nodes,
+            SAFE_TO_JSON(EDGES(p)) AS route_edges;
+        `,
+        params: {
+          startNodeId,
+          endNodeId,
+        },
+      };
+
+      const [rows] = await database.run(query);
+      
+      if (rows.length === 0) {
+        return res.status(404).json({ error: "No route found" });
+      }
+
+      const row = rows[0].toJSON();
+      const routeNodes = typeof row.route_nodes === 'string' ? JSON.parse(row.route_nodes) : row.route_nodes;
+      
+      // Convert route nodes to a list of coordinates
+      const coordinates = routeNodes.map((node: any) => {
+        // Based on the Spanner Graph example, properties are in node.properties
+        const props = node.properties || {};
+        const geom = props.geom;
+        
+        if (geom) {
+          try {
+            const geometry = wellknown.parse(geom);
+            if (geometry && geometry.type === 'Point') {
+              return geometry.coordinates;
+            }
+          } catch (e) {
+            console.warn("Failed to parse geometry:", geom);
+          }
+        }
+        return null;
+      }).filter((c: any) => c !== null);
+
+      res.json({
+        nodes: routeNodes,
+        coordinates: coordinates,
+        source: "spanner_graph"
+      });
+    } catch (error: any) {
+      console.error("Error in /api/route:", error.message);
+      
+      // Mock fallback for routing if Spanner fails
+      // In a real app, you'd want a more robust fallback or a clear error.
+      res.status(500).json({ 
+        error: error.message,
+        details: "Routing requires a live Spanner Graph connection with the 'indoorRoutingGraph' defined."
+      });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
