@@ -477,11 +477,13 @@ RETURN
                   ? `${steps.slice(0, -1).join(', ')}, and finally ${steps[steps.length - 1]}.`
                   : `You are already at your destination.`;
                 
+                const detailsText = `--- GQL QUERY ---\n${gqlQuery}\n\n--- GQL RESPONSE ---\n${JSON.stringify(data, null, 2)}`;
+
                 setMessages(prev => [...prev, {
                   id: Date.now().toString(),
-                  text: `Route found! ${instructionText}`,
+                  text: `Route found (${data.nodes.length} steps)! ${instructionText}`,
                   sender: 'ai',
-                  details: gqlQuery
+                  details: detailsText
                 }]);
                 
                 infoWindow.close();
@@ -607,7 +609,7 @@ RETURN
               <div>{msg.text}</div>
               {msg.details && (
                 <details style={{ marginTop: '8px', fontSize: '0.75rem', opacity: 0.8 }}>
-                  <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Show more details (GQL)</summary>
+                  <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Query Preview</summary>
                   <pre style={{ 
                     marginTop: '4px', 
                     padding: '8px', 
