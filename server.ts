@@ -104,15 +104,20 @@ async function startServer() {
             const content = fs.readFileSync(filePath, "utf8");
             const geojson = JSON.parse(content);
             if (geojson.features) {
-              // Add source file info to properties
-              const featuresWithSource = geojson.features.map((f: any) => ({
-                ...f,
-                properties: {
-                  ...(f.properties || {}),
-                  source_file: fileName,
-                  node_type: f.feature_type || (f.properties && f.properties.feature_type) || fileName.split('.')[0]
-                }
-              }));
+              // Add source file info to properties and filter out anchors
+              const featuresWithSource = geojson.features
+                .filter((f: any) => {
+                  const nodeType = f.feature_type || (f.properties && f.properties.feature_type) || fileName.split('.')[0];
+                  return nodeType !== 'anchor';
+                })
+                .map((f: any) => ({
+                  ...f,
+                  properties: {
+                    ...(f.properties || {}),
+                    source_file: fileName,
+                    node_type: f.feature_type || (f.properties && f.properties.feature_type) || fileName.split('.')[0]
+                  }
+                }));
               combinedFeatures = [...combinedFeatures, ...featuresWithSource];
               loadedFiles.push(fileName);
             }
@@ -160,7 +165,7 @@ async function startServer() {
             search_context, 
             geom as geom_wkt
           FROM Map_Nodes
-          WHERE floor_number = '1'
+          WHERE floor_number = '1' AND node_type != 'anchor'
         `,
       };
 
@@ -230,6 +235,35 @@ async function startServer() {
         isApiDisabled,
         enableApiUrl
       });
+    }
+  });
+
+  // --- API Endpoint: Get Levels ---
+  app.get("/api/levels", async (req, res) => {
+    try {
+      const geojsonDir = path.join(__dirname, "src", "data", "geojson");
+      const levelFilePath = path.join(geojsonDir, "level.geojson");
+      
+      if (fs.existsSync(levelFilePath)) {
+        const content = fs.readFileSync(levelFilePath, "utf8");
+        const geojson = JSON.parse(content);
+        
+        if (geojson.features) {
+          const levels = geojson.features.map((f: any) => ({
+            id: f.id,
+            name: f.properties.name?.en || f.properties.name || "Unnamed Level",
+            short_name: f.properties.short_name?.en || f.properties.short_name || "",
+            ordinal: f.properties.ordinal ?? 0
+          })).sort((a: any, b: any) => a.ordinal - b.ordinal);
+          
+          return res.json(levels);
+        }
+      }
+      
+      res.json([]);
+    } catch (error: any) {
+      console.error("Error in /api/levels:", error.message);
+      res.status(500).json({ error: error.message });
     }
   });
 

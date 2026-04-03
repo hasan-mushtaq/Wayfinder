@@ -1,6 +1,14 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { CATEGORY_COLORS } from './constants';
 import Legend from './components/Legend';
+import FloorPicker from './components/FloorPicker';
+
+interface Level {
+  id: string;
+  name: string;
+  short_name: string;
+  ordinal: number;
+}
 
 interface Message {
   id: string;
@@ -20,7 +28,11 @@ export default function App() {
     { id: '1', text: 'Welcome to Wayfinder! I am your AI Concierge. How can I help you navigate today?', sender: 'ai' }
   ]);
   const [inputValue, setInputValue] = useState('');
+  const [levels, setLevels] = useState<Level[]>([]);
+  const [selectedLevelId, setSelectedLevelId] = useState<string | null>(null);
   const mapRef = useRef<any>(null);
+  const entranceMarkerRef = useRef<any>(null);
+  const entranceInfoWindowRef = useRef<any>(null);
   const messageEndRef = useRef<HTMLDivElement>(null);
 
   // Scroll to bottom of chat
@@ -28,14 +40,147 @@ export default function App() {
     messageEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Fetch Levels
+  useEffect(() => {
+    const fetchLevels = async () => {
+      try {
+        const response = await fetch('/api/levels');
+        if (response.ok) {
+          const data = await response.json();
+          setLevels(data);
+          // Default to the ground floor (ordinal 0) or the first level
+          if (data.length > 0 && !selectedLevelId) {
+            const groundFloor = data.find((l: any) => l.ordinal === 0) || data[0];
+            setSelectedLevelId(groundFloor.id);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching levels:", err);
+      }
+    };
+    fetchLevels();
+  }, []);
+
+  // Update Map Style and Marker visibility when selectedLevelId changes
+  useEffect(() => {
+    if (mapRef.current) {
+      if (mapRef.current.data) {
+        applyMapStyle(mapRef.current);
+      }
+      
+      // Handle "You are here" marker visibility
+      // Parkway level ID: e537d463-475b-43c3-a650-184566c68bc9
+      if (entranceMarkerRef.current) {
+        if (selectedLevelId === 'e537d463-475b-43c3-a650-184566c68bc9') {
+          entranceMarkerRef.current.setMap(mapRef.current);
+          // Optionally open info window by default on the correct floor
+          if (entranceInfoWindowRef.current) {
+            entranceInfoWindowRef.current.open(mapRef.current, entranceMarkerRef.current);
+          }
+        } else {
+          entranceMarkerRef.current.setMap(null);
+          if (entranceInfoWindowRef.current) {
+            entranceInfoWindowRef.current.close();
+          }
+        }
+      }
+    }
+  }, [selectedLevelId, levels]);
+
+  const applyMapStyle = (map: any) => {
+    const selectedLevel = levels.find(l => l.id === selectedLevelId);
+    const selectedOrdinal = selectedLevel?.ordinal;
+
+    map.data.setStyle((feature: any) => {
+      const category = feature.getProperty('category');
+      const nodeType = feature.getProperty('node_type');
+      const sourceFile = feature.getProperty('source_file');
+      const levelId = feature.getProperty('level_id');
+      const featureId = feature.getId();
+      const isLevelFeature = sourceFile === 'level.geojson';
+      
+      let color = '#007aff'; // Default blue
+      let weight = 1;
+      let opacity = 0.2;
+      let visible = true;
+
+      // Hide anchor nodes as they cause confusion across levels
+      if (nodeType === 'anchor') {
+        visible = false;
+      }
+
+      // Filter by floor (ordinal)
+      if (selectedOrdinal !== undefined) {
+        if (levelId) {
+          const featureLevel = levels.find(l => l.id === levelId);
+          if (featureLevel && featureLevel.ordinal !== selectedOrdinal) {
+            visible = false;
+          }
+        } else if (isLevelFeature) {
+          const featureLevel = levels.find(l => l.id === featureId);
+          if (featureLevel && featureLevel.ordinal !== selectedOrdinal) {
+            visible = false;
+          }
+        }
+      }
+
+      // Styling based on category/type
+      if (category && CATEGORY_COLORS[category]) {
+        color = CATEGORY_COLORS[category].color;
+        opacity = 0.4;
+        
+        // Custom opacities for specific categories
+        if (category === 'walkway') opacity = 0.6;
+        if (category === 'opentobelow') opacity = 0.1;
+        if (category === 'nonpublic') opacity = 0.2;
+        if (category === 'opening') opacity = 1;
+      }
+      
+      // Styling based on source file
+      if (sourceFile === 'venue.geojson') {
+        color = '#000000';
+        weight = 2;
+        opacity = 0.05;
+      } else if (sourceFile === 'footprint.geojson') {
+        color = '#333333';
+        weight = 1;
+        opacity = 0.1;
+      } else if (sourceFile === 'opening.geojson') {
+        color = '#ff3b30';
+        weight = 3;
+        opacity = 1;
+      } else if (sourceFile === 'level.geojson') {
+        color = '#f8f9fa';
+        weight = 1;
+        opacity = 0.3;
+      }
+
+      return {
+        fillColor: color,
+        strokeColor: color,
+        strokeWeight: weight,
+        fillOpacity: opacity,
+        visible: visible,
+        icon: {
+          path: window.google.maps.SymbolPath.CIRCLE,
+          scale: 4,
+          fillColor: color,
+          fillOpacity: 0.8,
+          strokeWeight: 1
+        }
+      };
+    });
+  };
+
   // Initialize Map
   useEffect(() => {
     window.initMap = async () => {
-      const center = { lat: 37.329, lng: -121.888 };
+      // Coordinates for unit b2ff5e53-3ab3-4361-a045-09a5bc45ac53
+      const startPos = { lat: 37.329478, lng: -121.889076 };
       const mapOptions = {
-        zoom: 18,
-        center: center,
-        mapId: 'DEMO_MAP_ID', // Optional: for advanced styling
+        zoom: 19,
+        center: startPos,
+        mapId: 'DEMO_MAP_ID',
         disableDefaultUI: false,
         styles: [
           {
@@ -50,11 +195,31 @@ export default function App() {
         const map = new window.google.maps.Map(document.getElementById('map'), mapOptions);
         mapRef.current = map;
         
-        // Add a marker for the museum
-        new window.google.maps.Marker({
-          position: center,
-          map: map,
-          title: "Wayfinder Main Entrance"
+        // Add a "You are here" marker for the starting point
+        const entranceMarker = new window.google.maps.Marker({
+          position: startPos,
+          map: null, // Initially null, visibility handled by useEffect
+          title: "You are here",
+          icon: {
+            // Material Design 'person_pin' icon path
+            path: 'M12 2c-4.07 0-7.07 3.22-7.07 6.48 0 3.19 3.35 7.14 7.07 11.52 3.72-4.38 7.07-8.33 7.07-11.52C19.07 5.22 16.07 2 12 2zm0 4c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 10c-2.33 0-4.31-1.17-5.41-2.92.03-1.79 3.61-2.78 5.41-2.78 1.79 0 5.38.99 5.41 2.78-1.1 1.75-3.08 2.92-5.41 2.92z',
+            fillColor: "#007aff",
+            fillOpacity: 1,
+            strokeWeight: 2,
+            strokeColor: "#ffffff",
+            scale: 2,
+            anchor: new window.google.maps.Point(12, 20),
+          }
+        });
+        entranceMarkerRef.current = entranceMarker;
+
+        const entranceInfoWindow = new window.google.maps.InfoWindow({
+          content: '<div style="padding: 4px; font-weight: 600; color: #1c1c1e;">You are here</div>'
+        });
+        entranceInfoWindowRef.current = entranceInfoWindow;
+        
+        entranceMarker.addListener('click', () => {
+          entranceInfoWindow.open(map, entranceMarker);
         });
 
         // --- Fetch and Load Spanner Data ---
@@ -105,57 +270,7 @@ export default function App() {
           }
           
           // Style the GeoJSON features
-          map.data.setStyle((feature: any) => {
-            const category = feature.getProperty('category');
-            const sourceFile = feature.getProperty('source_file');
-            
-            let color = '#007aff'; // Default blue
-            let weight = 1;
-            let opacity = 0.2;
-            let visible = true;
-
-            // Styling based on category/type
-            if (category && CATEGORY_COLORS[category]) {
-              color = CATEGORY_COLORS[category].color;
-              opacity = 0.4;
-              
-              // Custom opacities for specific categories
-              if (category === 'walkway') opacity = 0.6;
-              if (category === 'opentobelow') opacity = 0.1;
-              if (category === 'nonpublic') opacity = 0.2;
-              if (category === 'opening') opacity = 1;
-            }
-            
-            // Styling based on source file
-            if (sourceFile === 'venue.geojson') {
-              color = '#000000';
-              weight = 2;
-              opacity = 0.05;
-            } else if (sourceFile === 'footprint.geojson') {
-              color = '#333333';
-              weight = 1;
-              opacity = 0.1;
-            } else if (sourceFile === 'opening.geojson') {
-              color = '#ff3b30';
-              weight = 3;
-              opacity = 1;
-            }
-
-            return {
-              fillColor: color,
-              strokeColor: color,
-              strokeWeight: weight,
-              fillOpacity: opacity,
-              visible: visible,
-              icon: {
-                path: window.google.maps.SymbolPath.CIRCLE,
-                scale: 4,
-                fillColor: color,
-                fillOpacity: 0.8,
-                strokeWeight: 1
-              }
-            };
-          });
+          applyMapStyle(map);
 
           // Show info window on click
           const infoWindow = new window.google.maps.InfoWindow();
@@ -319,6 +434,11 @@ export default function App() {
       {/* Right Panel: Map UI */}
       <div className="map-panel">
         <Legend />
+        <FloorPicker 
+          levels={levels} 
+          selectedLevelId={selectedLevelId} 
+          onSelectLevel={setSelectedLevelId} 
+        />
         <div id="map"></div>
       </div>
     </div>
