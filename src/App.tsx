@@ -407,10 +407,25 @@ export default function App() {
                 }));
                 
                 drawRouteLine(path);
+
+                // Generate descriptive instructions
+                const steps = data.nodes.map((node: any, index: number) => {
+                  const props = node.properties || {};
+                  const name = props.name || (props.category ? props.category.replace(/\./g, ' ') : props.node_type);
+                  const capitalized = name.charAt(0).toUpperCase() + name.slice(1);
+                  
+                  if (index === 0) return `Start at ${capitalized}`;
+                  if (index === data.nodes.length - 1) return `arrive at ${capitalized}`;
+                  return `pass through ${capitalized}`;
+                });
+
+                const instructionText = steps.length > 1 
+                  ? `${steps.slice(0, -1).join(', ')}, and finally ${steps[steps.length - 1]}.`
+                  : `You are already at your destination.`;
                 
                 setMessages(prev => [...prev, {
                   id: Date.now().toString(),
-                  text: `Route found! Follow the blue line on the map. Total steps: ${data.nodes.length}`,
+                  text: `Route found! ${instructionText}`,
                   sender: 'ai'
                 }]);
               } else {
@@ -487,12 +502,33 @@ export default function App() {
       path: coordinates,
       geodesic: true,
       strokeColor: '#007aff',
-      strokeOpacity: 0.8,
-      strokeWeight: 6,
+      strokeOpacity: 1.0,
+      strokeWeight: 8,
+      zIndex: 1000,
     });
 
+    // Add a white "glow" or border for better visibility on dark/busy map areas
+    const routeBorder = new window.google.maps.Polyline({
+      path: coordinates,
+      geodesic: true,
+      strokeColor: '#ffffff',
+      strokeOpacity: 0.5,
+      strokeWeight: 12,
+      zIndex: 999,
+    });
+
+    routeBorder.setMap(mapRef.current);
     routePath.setMap(mapRef.current);
-    currentRouteRef.current = routePath;
+    
+    // Store both for clearing
+    currentRouteRef.current = {
+      path: routePath,
+      border: routeBorder,
+      setMap: (map: any) => {
+        routePath.setMap(map);
+        routeBorder.setMap(map);
+      }
+    };
     
     // Auto-center on the route
     const bounds = new window.google.maps.LatLngBounds();
