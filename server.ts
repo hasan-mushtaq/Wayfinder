@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { Spanner } from "@google-cloud/spanner";
 import cors from "cors";
+import wellknown from "wellknown";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -90,7 +91,7 @@ async function startServer() {
             node_id, 
             name, 
             category, 
-            geom as geom_geojson
+            geom as geom_wkt
           FROM Map_Nodes
           WHERE floor_number = '1'
         `,
@@ -100,14 +101,17 @@ async function startServer() {
       const [rows] = await database.run(query);
       
       const features: GeoJSONFeature[] = rows.map((row: any) => {
-        const spannerRow = row.toJSON() as SpannerRow;
+        const spannerRow = row.toJSON();
+        // Parse the WKT (Well-Known Text) into GeoJSON using the wellknown library
+        const geometry = spannerRow.geom_wkt ? wellknown.parse(spannerRow.geom_wkt) : null;
+        
         return {
           type: "Feature",
-          geometry: JSON.parse(spannerRow.geom_geojson),
+          geometry: geometry,
           properties: {
             node_id: spannerRow.node_id,
-            name: spannerRow.name,
-            category: spannerRow.category,
+            name: spannerRow.name || "",
+            category: spannerRow.category || "unknown",
           },
         };
       });
