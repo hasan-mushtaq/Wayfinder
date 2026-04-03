@@ -85,20 +85,43 @@ async function startServer() {
         };
       });
 
-      const featureCollection: GeoJSONFeatureCollection = {
+      res.json({
         type: "FeatureCollection",
         features: features,
-      };
-
-      res.json(featureCollection);
+        source: "spanner"
+      });
     } catch (error: any) {
-      console.error("Error querying Spanner:", error);
-      // Return the specific error message to help the user diagnose API enablement/permission issues
-      const errorMessage = error.message || "Failed to fetch map data from Spanner";
-      res.status(500).json({ 
-        error: errorMessage,
-        details: error.details || null,
-        code: error.code || null
+      console.error("Spanner unavailable, falling back to mock data:", error.message);
+      
+      // --- Mock Data Fallback for Preview/Testing ---
+      const mockFeatures: GeoJSONFeature[] = [
+        {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [-121.888, 37.329] },
+          properties: { node_id: "m1", name: "Main Entrance", category: "facility" }
+        },
+        {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [-121.8885, 37.3295] },
+          properties: { node_id: "e1", name: "T-Rex Exhibit", category: "exhibit" }
+        },
+        {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [-121.8875, 37.3285] },
+          properties: { node_id: "f1", name: "Cafe & Restrooms", category: "facility" }
+        },
+        {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [-121.889, 37.330] },
+          properties: { node_id: "e2", name: "Space Gallery", category: "exhibit" }
+        }
+      ];
+
+      res.json({
+        type: "FeatureCollection",
+        features: mockFeatures,
+        source: "mock",
+        warning: "Using mock data because Spanner API is disabled or unreachable in this environment."
       });
     }
   });
