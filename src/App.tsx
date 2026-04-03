@@ -58,7 +58,10 @@ export default function App() {
         // --- Fetch and Load Spanner Data ---
         try {
           const response = await fetch('/api/map-nodes');
-          if (!response.ok) throw new Error('Failed to fetch map nodes');
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to fetch map nodes');
+          }
           const geoJsonData = await response.json();
           
           // Add GeoJSON data to map
@@ -100,8 +103,14 @@ export default function App() {
             infoWindow.open(map);
           });
 
-        } catch (error) {
+        } catch (error: any) {
           console.error("Error loading map nodes:", error);
+          // Update the UI to show the specific error if the API is disabled
+          setMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            text: `⚠️ Error loading map data: ${error.message}. Please ensure the Spanner API is enabled in your Google Cloud project.`,
+            sender: 'ai'
+          }]);
         }
       }
     };

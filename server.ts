@@ -9,17 +9,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // --- Spanner Configuration ---
-const projectId = process.env.GOOGLE_CLOUD_PROJECT;
+// Default to the project where the database is located, but allow override via environment variable.
+const targetProjectId = process.env.SPANNER_PROJECT_ID || "464794370950";
 const instanceId = "indoor-routing";
 const databaseId = "routing";
 
-// Initialize Spanner with metrics disabled to avoid permission issues
+// Initialize Spanner with metrics disabled and explicit quota project
 const spanner = new Spanner({ 
-  projectId,
-  // Disable client-side metrics to prevent "Send TimeSeries failed" errors
-  // if the service account lacks monitoring.metricWriter permissions.
+  projectId: targetProjectId,
+  // Force the quota/billing to be attributed to the target project
+  // This helps avoid "API not enabled" errors in the local preview project.
+  quotaProjectId: targetProjectId,
   clientSideMetricsConfig: { enabled: false }
-});
+} as any);
 const instance = spanner.instance(instanceId);
 const database = instance.database(databaseId);
 
@@ -89,9 +91,15 @@ async function startServer() {
       };
 
       res.json(featureCollection);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error querying Spanner:", error);
-      res.status(500).json({ error: "Failed to fetch map data from Spanner" });
+      // Return the specific error message to help the user diagnose API enablement/permission issues
+      const errorMessage = error.message || "Failed to fetch map data from Spanner";
+      res.status(500).json({ 
+        error: errorMessage,
+        details: error.details || null,
+        code: error.code || null
+      });
     }
   });
 
