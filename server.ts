@@ -3,7 +3,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { Spanner } from "@google-cloud/spanner";
-import cors from "cors";
+import cors from "cors";ƒ
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,7 +20,13 @@ const spanner = new Spanner({
   // Force the quota/billing to be attributed to the target project
   // This helps avoid "API not enabled" errors in the local preview project.
   quotaProjectId: targetProjectId,
-  clientSideMetricsConfig: { enabled: false }
+  // Disable client-side metrics to prevent "Send TimeSeries failed" errors
+  // if the service account lacks monitoring.metricWriter permissions.
+  clientSideMetricsConfig: { enabled: false },
+  // Some versions of the SDK might use monitoringConfig
+  monitoringConfig: { enabled: false },
+  // Another way to disable monitoring in some versions
+  monitoring: false
 } as any);
 const instance = spanner.instance(instanceId);
 const database = instance.database(databaseId);
@@ -48,6 +54,26 @@ interface GeoJSONFeatureCollection {
   features: GeoJSONFeature[];
 }
 
+// --- Global Error Handlers to suppress background Spanner metrics errors ---
+process.on("unhandledRejection", (reason: any) => {
+  // Suppress "Send TimeSeries failed" background errors from Spanner
+  if (reason?.message?.includes("Send TimeSeries failed") || reason?.message?.includes("monitoring metric writer permission")) {
+    console.warn("Suppressed background Spanner metrics error:", reason.message);
+    return;
+  }
+  console.error("Unhandled Rejection:", reason);
+});
+
+process.on("uncaughtException", (error: any) => {
+  // Suppress "Send TimeSeries failed" background errors from Spanner
+  if (error?.message?.includes("Send TimeSeries failed") || error?.message?.includes("monitoring metric writer permission")) {
+    console.warn("Suppressed background Spanner metrics error:", error.message);
+    return;
+  }
+  console.error("Uncaught Exception:", error);
+  process.exit(1);
+});
+
 async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
@@ -64,11 +90,12 @@ async function startServer() {
             node_id, 
             name, 
             category, 
-            ST_ASGEOJSON(geom) as geom_geojson
+            geom as geom_geojson
           FROM Map_Nodes
           WHERE floor_number = '1'
         `,
       };
+  
 
       const [rows] = await database.run(query);
       
