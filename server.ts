@@ -10,7 +10,7 @@ const __dirname = path.dirname(__filename);
 
 // --- Spanner Configuration ---
 // Default to the project where the database is located, but allow override via environment variable.
-const targetProjectId = process.env.SPANNER_PROJECT_ID || "464794370950";
+const targetProjectId = process.env.SPANNER_PROJECT_ID || "no-genai-live";
 const instanceId = "indoor-routing";
 const databaseId = "routing";
 
