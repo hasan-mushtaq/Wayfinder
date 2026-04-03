@@ -108,9 +108,9 @@ async function startServer() {
               const featuresWithSource = geojson.features.map((f: any) => ({
                 ...f,
                 properties: {
-                  ...f.properties,
+                  ...(f.properties || {}),
                   source_file: fileName,
-                  node_type: f.feature_type || f.properties.feature_type || fileName.split('.')[0]
+                  node_type: f.feature_type || (f.properties && f.properties.feature_type) || fileName.split('.')[0]
                 }
               }));
               combinedFeatures = [...combinedFeatures, ...featuresWithSource];

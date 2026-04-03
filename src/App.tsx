@@ -1,4 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { CATEGORY_COLORS } from './constants';
+import Legend from './components/Legend';
 
 interface Message {
   id: string;
@@ -105,7 +107,6 @@ export default function App() {
           // Style the GeoJSON features
           map.data.setStyle((feature: any) => {
             const category = feature.getProperty('category');
-            const nodeType = feature.getProperty('node_type');
             const sourceFile = feature.getProperty('source_file');
             
             let color = '#007aff'; // Default blue
@@ -114,15 +115,16 @@ export default function App() {
             let visible = true;
 
             // Styling based on category/type
-            if (category === 'room') { color = '#ff9500'; opacity = 0.4; }
-            else if (category === 'walkway') { color = '#f2f2f7'; opacity = 0.6; }
-            else if (category === 'stairs' || category === 'steps') { color = '#5856d6'; opacity = 0.5; }
-            else if (category === 'elevator') { color = '#af52de'; opacity = 0.6; }
-            else if (category === 'escalator') { color = '#ff2d55'; opacity = 0.6; }
-            else if (category === 'restroom.male' || category === 'restroom.female' || category === 'restroom') { color = '#34c759'; opacity = 0.5; }
-            else if (category === 'parking') { color = '#8e8e93'; opacity = 0.3; }
-            else if (category === 'nonpublic') { color = '#c7c7cc'; opacity = 0.2; }
-            else if (category === 'opentobelow') { color = '#ffffff'; opacity = 0.1; }
+            if (category && CATEGORY_COLORS[category]) {
+              color = CATEGORY_COLORS[category].color;
+              opacity = 0.4;
+              
+              // Custom opacities for specific categories
+              if (category === 'walkway') opacity = 0.6;
+              if (category === 'opentobelow') opacity = 0.1;
+              if (category === 'nonpublic') opacity = 0.2;
+              if (category === 'opening') opacity = 1;
+            }
             
             // Styling based on source file
             if (sourceFile === 'venue.geojson') {
@@ -158,11 +160,46 @@ export default function App() {
           // Show info window on click
           const infoWindow = new window.google.maps.InfoWindow();
           map.data.addListener('click', (event: any) => {
-            const properties = event.feature.getProperties ? event.feature.getProperties() : {};
-            const name = properties.name?.en || properties.name || 'Unnamed Space';
-            const category = properties.category || 'No Category';
-            const nodeType = properties.node_type || 'No Type';
-            const sourceFile = properties.source_file || 'Unknown';
+            const feature = event.feature;
+            
+            // Helper to capitalize strings for better display
+            const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).replace(/\./g, ' ');
+
+            // Correct way to get properties from Google Maps Data Layer features
+            const nameProp = feature.getProperty('name');
+            const categoryProp = feature.getProperty('category');
+            const nodeType = feature.getProperty('node_type') || 'No Type';
+            const sourceFile = feature.getProperty('source_file') || 'Unknown';
+
+            // Handle object-based category
+            const category = (typeof categoryProp === 'object' && categoryProp !== null)
+              ? (categoryProp.en || Object.values(categoryProp)[0] || 'No Category')
+              : (categoryProp || 'No Category');
+
+            // Improved name logic with fallbacks
+            let name = 'Unnamed Space';
+            const altNameProp = feature.getProperty('alt_name');
+            
+            if (typeof nameProp === 'object' && nameProp !== null && Object.keys(nameProp).length > 0) {
+              name = nameProp.en || Object.values(nameProp)[0] || name;
+            } else if (nameProp && typeof nameProp === 'string' && nameProp.trim() !== '') {
+              name = nameProp;
+            } else if (typeof altNameProp === 'object' && altNameProp !== null && Object.keys(altNameProp).length > 0) {
+              name = altNameProp.en || Object.values(altNameProp)[0] || name;
+            } else if (altNameProp && typeof altNameProp === 'string' && altNameProp.trim() !== '') {
+              name = altNameProp;
+            }
+
+            // If name is still generic, use category or nodeType as fallback
+            if (name === 'Unnamed Space') {
+              if (category && category !== 'No Category') {
+                name = capitalize(category);
+              } else if (nodeType && nodeType !== 'No Type') {
+                name = capitalize(nodeType);
+              } else if (feature.getId()) {
+                name = `Space ${feature.getId().toString().slice(0, 8)}`;
+              }
+            }
             
             infoWindow.setContent(`
               <div style="padding: 12px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 250px;">
@@ -175,7 +212,7 @@ export default function App() {
                   <strong>Source:</strong> ${sourceFile}
                 </div>
                 <div style="font-size: 12px; color: #8e8e93; margin-top: 8px; border-top: 1px solid #e5e5ea; padding-top: 8px;">
-                  ID: ${event.feature.getId() || 'N/A'}
+                  ID: ${feature.getId() || 'N/A'}
                 </div>
               </div>
             `);
@@ -281,6 +318,7 @@ export default function App() {
 
       {/* Right Panel: Map UI */}
       <div className="map-panel">
+        <Legend />
         <div id="map"></div>
       </div>
     </div>
