@@ -14,6 +14,7 @@ interface Message {
   id: string;
   text: string;
   sender: 'user' | 'ai';
+  details?: string;
 }
 
 declare global {
@@ -21,6 +22,8 @@ declare global {
     initMap: () => void;
     google: any;
     handleNavigate: (destinationId: string, destinationName: string) => void;
+    handleSetStart: (nodeId: string, nodeName: string, lat: number, lng: number) => void;
+    handleClearStart: () => void;
   }
 }
 
@@ -37,14 +40,20 @@ export default function App() {
   }, [levels]);
 
   const [selectedLevelId, setSelectedLevelId] = useState<string | null>(null);
+  const [startNode, setStartNode] = useState<{ id: string, name: string } | null>(null);
+  const startNodeRef = useRef<{ id: string, name: string } | null>(null);
+  
+  useEffect(() => {
+    startNodeRef.current = startNode;
+  }, [startNode]);
+
   const selectedLevelIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     selectedLevelIdRef.current = selectedLevelId;
   }, [selectedLevelId]);
   const mapRef = useRef<any>(null);
-  const entranceMarkerRef = useRef<any>(null);
-  const entranceInfoWindowRef = useRef<any>(null);
+  const startMarkerRef = useRef<any>(null);
   const currentRouteRef = useRef<any>(null);
   const messageEndRef = useRef<HTMLDivElement>(null);
 
@@ -74,28 +83,11 @@ export default function App() {
     fetchLevels();
   }, []);
 
-  // Update Map Style and Marker visibility when selectedLevelId changes
+  // Update Map Style when selectedLevelId changes
   useEffect(() => {
     if (mapRef.current) {
       if (mapRef.current.data) {
         applyMapStyle(mapRef.current);
-      }
-      
-      // Handle "You are here" marker visibility
-      // Parkway level ID: e537d463-475b-43c3-a650-184566c68bc9
-      if (entranceMarkerRef.current) {
-        if (selectedLevelId === 'e537d463-475b-43c3-a650-184566c68bc9') {
-          entranceMarkerRef.current.setMap(mapRef.current);
-          // Optionally open info window by default on the correct floor
-          if (entranceInfoWindowRef.current) {
-            entranceInfoWindowRef.current.open(mapRef.current, entranceMarkerRef.current);
-          }
-        } else {
-          entranceMarkerRef.current.setMap(null);
-          if (entranceInfoWindowRef.current) {
-            entranceInfoWindowRef.current.close();
-          }
-        }
       }
     }
   }, [selectedLevelId, levels]);
@@ -208,33 +200,6 @@ export default function App() {
         const map = new window.google.maps.Map(document.getElementById('map'), mapOptions);
         mapRef.current = map;
         
-        // Add a "You are here" marker for the starting point
-        const entranceMarker = new window.google.maps.Marker({
-          position: startPos,
-          map: null, // Initially null, visibility handled by useEffect
-          title: "You are here",
-          icon: {
-            // Material Design 'person_pin' icon path
-            path: 'M12 2c-4.07 0-7.07 3.22-7.07 6.48 0 3.19 3.35 7.14 7.07 11.52 3.72-4.38 7.07-8.33 7.07-11.52C19.07 5.22 16.07 2 12 2zm0 4c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 10c-2.33 0-4.31-1.17-5.41-2.92.03-1.79 3.61-2.78 5.41-2.78 1.79 0 5.38.99 5.41 2.78-1.1 1.75-3.08 2.92-5.41 2.92z',
-            fillColor: "#007aff",
-            fillOpacity: 1,
-            strokeWeight: 2,
-            strokeColor: "#ffffff",
-            scale: 2,
-            anchor: new window.google.maps.Point(12, 20),
-          }
-        });
-        entranceMarkerRef.current = entranceMarker;
-
-        const entranceInfoWindow = new window.google.maps.InfoWindow({
-          content: '<div style="padding: 4px; font-weight: 600; color: #1c1c1e;">You are here</div>'
-        });
-        entranceInfoWindowRef.current = entranceInfoWindow;
-        
-        entranceMarker.addListener('click', () => {
-          entranceInfoWindow.open(map, entranceMarker);
-        });
-
         // --- Fetch and Load Spanner Data ---
         try {
           const response = await fetch('/api/map-nodes');
@@ -343,6 +308,9 @@ export default function App() {
             }
             
             const featureId = feature.getId()?.toString();
+            const lat = event.latLng.lat();
+            const lng = event.latLng.lng();
+            const isStartNode = startNodeRef.current?.id === featureId;
             
             infoWindow.setContent(`
               <div style="padding: 12px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 250px;">
@@ -354,34 +322,120 @@ export default function App() {
                 <div style="font-size: 13px; color: #3a3a3c; margin-bottom: 4px;">
                   <strong>Level:</strong> ${levelName}
                 </div>
-                <div style="font-size: 13px; color: #3a3a3c; margin-bottom: 4px;">
-                  <strong>Source:</strong> ${sourceFile}
-                </div>
                 <div style="font-size: 12px; color: #8e8e93; margin-top: 8px; border-top: 1px solid #e5e5ea; padding-top: 8px; margin-bottom: 12px;">
                   ID: ${featureId || 'N/A'}
                 </div>
-                ${featureId ? `
-                  <button 
-                    id="nav-btn-${featureId}"
-                    style="width: 100%; background: #007aff; color: white; border: none; padding: 8px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px;"
-                    onclick="window.handleNavigate('${featureId}', '${name.replace(/'/g, "\\'")}')"
-                  >
-                    Navigate here
-                  </button>
-                ` : ''}
+                
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                  ${!startNodeRef.current ? `
+                    <button 
+                      style="width: 100%; background: #007aff; color: white; border: none; padding: 8px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px;"
+                      onclick="window.handleSetStart('${featureId}', '${name.replace(/'/g, "\\'")}', ${lat}, ${lng})"
+                    >
+                      Set as Start
+                    </button>
+                  ` : isStartNode ? `
+                    <button 
+                      style="width: 100%; background: #ff3b30; color: white; border: none; padding: 8px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px;"
+                      onclick="window.handleClearStart()"
+                    >
+                      Clear Start
+                    </button>
+                  ` : `
+                    <button 
+                      style="width: 100%; background: #34c759; color: white; border: none; padding: 8px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px;"
+                      onclick="window.handleNavigate('${featureId}', '${name.replace(/'/g, "\\'")}')"
+                    >
+                      Navigate here
+                    </button>
+                    <button 
+                      style="width: 100%; background: #e5e5ea; color: #3a3a3c; border: none; padding: 8px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px;"
+                      onclick="window.handleSetStart('${featureId}', '${name.replace(/'/g, "\\'")}', ${lat}, ${lng})"
+                    >
+                      Change Start
+                    </button>
+                  `}
+                </div>
               </div>
             `);
             infoWindow.setPosition(event.latLng);
             infoWindow.open(map);
           });
 
+          // Handle setting the start node
+          window.handleSetStart = (nodeId: string, nodeName: string, lat: number, lng: number) => {
+            setStartNode({ id: nodeId, name: nodeName });
+            
+            // Clear existing route if any
+            if (currentRouteRef.current) {
+              currentRouteRef.current.setMap(null);
+            }
+
+            // Place marker
+            if (startMarkerRef.current) {
+              startMarkerRef.current.setMap(null);
+            }
+
+            startMarkerRef.current = new window.google.maps.Marker({
+              position: { lat, lng },
+              map: mapRef.current,
+              title: `Start: ${nodeName}`,
+              icon: {
+                path: 'M12 2c-4.07 0-7.07 3.22-7.07 6.48 0 3.19 3.35 7.14 7.07 11.52 3.72-4.38 7.07-8.33 7.07-11.52C19.07 5.22 16.07 2 12 2zm0 4c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 10c-2.33 0-4.31-1.17-5.41-2.92.03-1.79 3.61-2.78 5.41-2.78 1.79 0 5.38.99 5.41 2.78-1.1 1.75-3.08 2.92-5.41 2.92z',
+                fillColor: "#007aff",
+                fillOpacity: 1,
+                strokeWeight: 2,
+                strokeColor: "#ffffff",
+                scale: 2,
+                anchor: new window.google.maps.Point(12, 20),
+              }
+            });
+
+            setMessages(prev => [...prev, {
+              id: Date.now().toString(),
+              text: `Start point set to ${nodeName}. Now select your destination.`,
+              sender: 'ai'
+            }]);
+            
+            infoWindow.close();
+          };
+
+          // Handle clearing the start node
+          window.handleClearStart = () => {
+            setStartNode(null);
+            if (startMarkerRef.current) {
+              startMarkerRef.current.setMap(null);
+            }
+            if (currentRouteRef.current) {
+              currentRouteRef.current.setMap(null);
+            }
+            setMessages(prev => [...prev, {
+              id: Date.now().toString(),
+              text: `Start point cleared.`,
+              sender: 'ai'
+            }]);
+            infoWindow.close();
+          };
+
           // Expose handleNavigate to window for the button click
           window.handleNavigate = async (destinationId: string, destinationName: string) => {
-            const startNodeId = 'b2ff5e53-3ab3-4361-a045-09a5bc45ac53';
+            const currentStart = startNodeRef.current;
+            if (!currentStart) return;
+
+            const startNodeId = currentStart.id;
+            const gqlQuery = `GRAPH indoorRoutingGraph
+MATCH p = ANY SHORTEST (start_node:Node {
+  node_id: '${startNodeId}'
+})-[e:connectsTo]->{1, 20} (end_node:Node {
+  node_id: '${destinationId}'
+})
+RETURN
+  SAFE_TO_JSON(NODES(p)) AS route_nodes,
+  SAFE_TO_JSON(EDGES(p)) AS route_edges;`;
             
             setMessages(prev => [...prev, {
               id: Date.now().toString(),
-              text: `Navigating to ${destinationName}...`,
+              text: `Navigating from ${currentStart.name} to ${destinationName}...`,
               sender: 'user'
             }]);
 
@@ -426,8 +480,11 @@ export default function App() {
                 setMessages(prev => [...prev, {
                   id: Date.now().toString(),
                   text: `Route found! ${instructionText}`,
-                  sender: 'ai'
+                  sender: 'ai',
+                  details: gqlQuery
                 }]);
+                
+                infoWindow.close();
               } else {
                 throw new Error('No coordinates found in route');
               }
@@ -547,7 +604,23 @@ export default function App() {
         <div className="message-history">
           {messages.map((msg) => (
             <div key={msg.id} className={`message ${msg.sender}`}>
-              {msg.text}
+              <div>{msg.text}</div>
+              {msg.details && (
+                <details style={{ marginTop: '8px', fontSize: '0.75rem', opacity: 0.8 }}>
+                  <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Show more details (GQL)</summary>
+                  <pre style={{ 
+                    marginTop: '4px', 
+                    padding: '8px', 
+                    background: 'rgba(0,0,0,0.05)', 
+                    borderRadius: '4px', 
+                    overflowX: 'auto',
+                    whiteSpace: 'pre-wrap',
+                    fontFamily: 'monospace'
+                  }}>
+                    {msg.details}
+                  </pre>
+                </details>
+              )}
             </div>
           ))}
           <div ref={messageEndRef} />
