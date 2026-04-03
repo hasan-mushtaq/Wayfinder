@@ -69,11 +69,15 @@ export default function App() {
 
           // If mock data is used, notify the user
           if (data.source === 'mock') {
-            setMessages(prev => [...prev, {
-              id: 'mock-warning',
-              text: '💡 Note: Using mock map data for this preview because the live Spanner API is restricted in this environment. The live connection will work when deployed to your production project.',
-              sender: 'ai'
-            }]);
+            setMessages(prev => {
+              // Check if the warning already exists to avoid duplicates
+              if (prev.some(m => m.id === 'mock-warning-static')) return prev;
+              return [...prev, {
+                id: 'mock-warning-static',
+                text: '💡 Note: Using mock map data for this preview because the live Spanner API is restricted in this environment. The live connection will work when deployed to your production project.',
+                sender: 'ai'
+              }];
+            });
           }
           
           // Style the GeoJSON features
