@@ -504,9 +504,18 @@ RETURN
                     }
                   }
 
-                  if (index === 0) steps.push(`Start at ${capitalized}`);
-                  else if (index === data.nodes.length - 1) steps.push(`arrive at ${capitalized}`);
-                  else steps.push(`pass through ${capitalized}`);
+                  let stepText = '';
+                  if (index === 0) stepText = `Start at ${capitalized}`;
+                  else if (index === data.nodes.length - 1) stepText = `arrive at ${capitalized}`;
+                  else {
+                    const isFacility = category.includes('elevator') || category.includes('escalator') || category.includes('stairs') || category.includes('steps');
+                    stepText = isFacility ? `pass through the ${name.toLowerCase()} area` : `pass through ${capitalized}`;
+                  }
+
+                  // Deduplicate consecutive identical steps
+                  if (steps.length === 0 || steps[steps.length - 1] !== stepText) {
+                    steps.push(stepText);
+                  }
                 });
 
                 const instructionText = steps.length > 1 
