@@ -475,24 +475,30 @@ RETURN
                   const props = node.properties || {};
                   const name = props.name || (props.category ? props.category.replace(/\./g, ' ') : props.node_type);
                   const capitalized = name.charAt(0).toUpperCase() + name.slice(1);
-                  const category = props.category || '';
-                  const levelId = props.level_id;
+                  const category = (props.category || '').toLowerCase();
+                  const levelId = props.level_id || props.levelId || props.floor_number;
 
                   // Check for floor change from previous node
                   if (index > 0) {
                     const prevNode = data.nodes[index - 1];
                     const prevProps = prevNode.properties || {};
-                    const prevLevelId = prevProps.level_id;
+                    const prevLevelId = prevProps.level_id || prevProps.levelId || prevProps.floor_number;
 
-                    if (prevLevelId && levelId && prevLevelId !== levelId) {
-                      const currentLevel = levelsRef.current.find(l => l.id === levelId);
-                      const prevLevel = levelsRef.current.find(l => l.id === prevLevelId);
+                    if (prevLevelId && levelId && String(prevLevelId) !== String(levelId)) {
+                      // Try to find levels by ID or ordinal/floor_number
+                      const currentLevel = levelsRef.current.find(l => String(l.id) === String(levelId) || String(l.ordinal) === String(levelId));
+                      const prevLevel = levelsRef.current.find(l => String(l.id) === String(prevLevelId) || String(l.ordinal) === String(prevLevelId));
                       
                       if (currentLevel && prevLevel) {
                         const direction = currentLevel.ordinal > prevLevel.ordinal ? 'up' : 'down';
-                        const facility = category.includes('elevator') ? 'elevator' : 
-                                       (category.includes('stairs') || category.includes('steps') ? 'stairs' : 
-                                       (category.includes('escalator') ? 'escalator' : 'stairs/elevator'));
+                        let facility = 'stairs/elevator';
+                        
+                        // Check current or previous node for facility type
+                        const combinedCategory = (category + ' ' + (prevProps.category || '').toLowerCase());
+                        if (combinedCategory.includes('elevator')) facility = 'elevator';
+                        else if (combinedCategory.includes('escalator')) facility = 'escalator';
+                        else if (combinedCategory.includes('stairs') || combinedCategory.includes('steps')) facility = 'stairs';
+                        
                         steps.push(`take the ${facility} ${direction} to ${currentLevel.name}`);
                       }
                     }
