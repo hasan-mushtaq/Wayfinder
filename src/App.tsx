@@ -470,14 +470,37 @@ RETURN
                 drawRouteLine(path);
 
                 // Generate descriptive instructions
-                const steps = data.nodes.map((node: any, index: number) => {
+                const steps: string[] = [];
+                data.nodes.forEach((node: any, index: number) => {
                   const props = node.properties || {};
                   const name = props.name || (props.category ? props.category.replace(/\./g, ' ') : props.node_type);
                   const capitalized = name.charAt(0).toUpperCase() + name.slice(1);
-                  
-                  if (index === 0) return `Start at ${capitalized}`;
-                  if (index === data.nodes.length - 1) return `arrive at ${capitalized}`;
-                  return `pass through ${capitalized}`;
+                  const category = props.category || '';
+                  const levelId = props.level_id;
+
+                  // Check for floor change from previous node
+                  if (index > 0) {
+                    const prevNode = data.nodes[index - 1];
+                    const prevProps = prevNode.properties || {};
+                    const prevLevelId = prevProps.level_id;
+
+                    if (prevLevelId && levelId && prevLevelId !== levelId) {
+                      const currentLevel = levelsRef.current.find(l => l.id === levelId);
+                      const prevLevel = levelsRef.current.find(l => l.id === prevLevelId);
+                      
+                      if (currentLevel && prevLevel) {
+                        const direction = currentLevel.ordinal > prevLevel.ordinal ? 'up' : 'down';
+                        const facility = category.includes('elevator') ? 'elevator' : 
+                                       (category.includes('stairs') || category.includes('steps') ? 'stairs' : 
+                                       (category.includes('escalator') ? 'escalator' : 'stairs/elevator'));
+                        steps.push(`take the ${facility} ${direction} to ${currentLevel.name}`);
+                      }
+                    }
+                  }
+
+                  if (index === 0) steps.push(`Start at ${capitalized}`);
+                  else if (index === data.nodes.length - 1) steps.push(`arrive at ${capitalized}`);
+                  else steps.push(`pass through ${capitalized}`);
                 });
 
                 const instructionText = steps.length > 1 
