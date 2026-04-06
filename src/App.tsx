@@ -29,7 +29,7 @@ declare global {
 
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([
-    { id: '1', text: 'Welcome to Wayfinder! I am your AI Concierge. How can I help you navigate today?', sender: 'ai' }
+    { id: '1', text: 'Welcome to Wayfinder! How can I help you navigate today?', sender: 'ai' }
   ]);
   const [inputValue, setInputValue] = useState('');
   const [levels, setLevels] = useState<Level[]>([]);
