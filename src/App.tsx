@@ -458,8 +458,12 @@ RETURN
 
               if (!response.ok) {
                 const errorData = await response.json();
+                const saHint = errorData.serviceAccount 
+                  ? `\n\nService Account: ${errorData.serviceAccount}\nHint: Ensure this service account has 'Vertex AI User' role on project 464794370950.`
+                  : `\n\nHint: If you see PERMISSION_DENIED, ensure the service account has Vertex AI User permissions.`;
+                
                 const detailsText = isAgent 
-                  ? `--- AGENT ERROR ---\n${JSON.stringify(errorData, null, 2)}`
+                  ? `--- AGENT ERROR ---\n${JSON.stringify(errorData, null, 2)}${saHint}`
                   : `--- GQL QUERY ---\n${gqlQuery}\n\n--- ERROR RESPONSE ---\n${JSON.stringify(errorData, null, 2)}`;
                 
                 setMessages(prev => [...prev, {
@@ -624,14 +628,27 @@ RETURN
           };
           setMessages(prev => [...prev, aiMessage]);
         } else {
-          throw new Error('Agent chat failed');
+          const errorData = await response.json();
+          const errorMsg = errorData.error || 'Agent chat failed';
+          const errorCode = errorData.code ? ` (Code: ${errorData.code})` : '';
+          const saHint = errorData.serviceAccount 
+            ? `\n\nService Account: ${errorData.serviceAccount}\nHint: Ensure this service account has 'Vertex AI User' role on project 464794370950.`
+            : `\n\nHint: If you see PERMISSION_DENIED, ensure the service account has Vertex AI User permissions.`;
+          
+          setMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            text: `❌ Agent error: ${errorMsg}${errorCode}`,
+            sender: 'ai',
+            details: `--- AGENT ERROR ---\n${JSON.stringify(errorData, null, 2)}${saHint}`
+          }]);
         }
       } catch (err: any) {
         console.error("Agent chat error:", err);
         setMessages(prev => [...prev, {
           id: Date.now().toString(),
           text: `❌ Agent error: ${err.message}`,
-          sender: 'ai'
+          sender: 'ai',
+          details: `Error: ${err.message}\n\nHint: If you see PERMISSION_DENIED, ensure the service account has Vertex AI User permissions.`
         }]);
       }
     } else {
