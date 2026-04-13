@@ -40,6 +40,13 @@ export default function App() {
   }, [levels]);
 
   const [selectedLevelId, setSelectedLevelId] = useState<string | null>(null);
+  const [isAgentMode, setIsAgentMode] = useState(false);
+  const isAgentModeRef = useRef(false);
+  
+  useEffect(() => {
+    isAgentModeRef.current = isAgentMode;
+  }, [isAgentMode]);
+
   const [startNode, setStartNode] = useState<{ id: string, name: string } | null>(null);
   const startNodeRef = useRef<{ id: string, name: string } | null>(null);
   
@@ -423,6 +430,9 @@ export default function App() {
             if (!currentStart) return;
 
             const startNodeId = currentStart.id;
+            const isAgent = isAgentModeRef.current;
+            const endpoint = isAgent ? '/api/agent-route' : '/api/route';
+            
             const gqlQuery = `GRAPH indoorRoutingGraph
 MATCH p = ANY SHORTEST (start_node:Node {
   node_id: '${startNodeId}'
@@ -435,12 +445,12 @@ RETURN
             
             setMessages(prev => [...prev, {
               id: Date.now().toString(),
-              text: `Navigating from ${currentStart.name} to ${destinationName}...`,
+              text: `${isAgent ? '🤖 Agent' : '🧭 Direct'} navigation from ${currentStart.name} to ${destinationName}...`,
               sender: 'user'
             }]);
 
             try {
-              const response = await fetch('/api/route', {
+              const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ startNodeId, endNodeId: destinationId })
@@ -448,10 +458,13 @@ RETURN
 
               if (!response.ok) {
                 const errorData = await response.json();
-                const detailsText = `--- GQL QUERY ---\n${gqlQuery}\n\n--- ERROR RESPONSE ---\n${JSON.stringify(errorData, null, 2)}`;
+                const detailsText = isAgent 
+                  ? `--- AGENT ERROR ---\n${JSON.stringify(errorData, null, 2)}`
+                  : `--- GQL QUERY ---\n${gqlQuery}\n\n--- ERROR RESPONSE ---\n${JSON.stringify(errorData, null, 2)}`;
+                
                 setMessages(prev => [...prev, {
                   id: Date.now().toString(),
-                  text: `❌ Routing failed: ${errorData.error || 'Unknown error'}`,
+                  text: `❌ ${isAgent ? 'Agent' : 'Routing'} failed: ${errorData.error || 'Unknown error'}`,
                   sender: 'ai',
                   details: detailsText
                 }]);
@@ -522,18 +535,23 @@ RETURN
                   ? `${steps.slice(0, -1).join(', ')}, and finally ${steps[steps.length - 1]}.`
                   : `You are already at your destination.`;
                 
-                const detailsText = `--- GQL QUERY ---\n${gqlQuery}\n\n--- GQL RESPONSE ---\n${JSON.stringify(data, null, 2)}`;
+                const detailsText = isAgent
+                  ? `--- AGENT RESPONSE ---\n${JSON.stringify(data, null, 2)}`
+                  : `--- GQL QUERY ---\n${gqlQuery}\n\n--- GQL RESPONSE ---\n${JSON.stringify(data, null, 2)}`;
 
                 setMessages(prev => [...prev, {
                   id: Date.now().toString(),
-                  text: `Route found (${data.nodes.length} steps)! ${instructionText}`,
+                  text: `Route found (${data.nodes.length} steps) via ${isAgent ? 'Agent' : 'Direct GQL'}! ${instructionText}`,
                   sender: 'ai',
                   details: detailsText
                 }]);
                 
                 infoWindow.close();
               } else {
-                const detailsText = `--- GQL QUERY ---\n${gqlQuery}\n\n--- GQL RESPONSE ---\n${JSON.stringify(data, null, 2)}`;
+                const detailsText = isAgent
+                  ? `--- AGENT RESPONSE ---\n${JSON.stringify(data, null, 2)}`
+                  : `--- GQL QUERY ---\n${gqlQuery}\n\n--- GQL RESPONSE ---\n${JSON.stringify(data, null, 2)}`;
+                
                 setMessages(prev => [...prev, {
                   id: Date.now().toString(),
                   text: `❌ No route found between these points.`,
@@ -543,7 +561,9 @@ RETURN
               }
             } catch (err: any) {
               console.error("Routing error:", err);
-              const detailsText = `--- GQL QUERY ---\n${gqlQuery}${err.details ? `\n\n--- ERROR ---\n${err.details}` : ''}`;
+              const detailsText = isAgent
+                ? `--- AGENT ERROR ---\n${err.message}`
+                : `--- GQL QUERY ---\n${gqlQuery}${err.details ? `\n\n--- ERROR ---\n${err.details}` : ''}`;
               
               setMessages(prev => [...prev, {
                 id: Date.now().toString(),
@@ -653,8 +673,33 @@ RETURN
     <div className="app-container">
       {/* Left Panel: Chat UI */}
       <div className="chat-panel">
-        <header className="chat-header">
-          <h1>Wayfinder</h1>
+        <header className="chat-header flex items-center justify-between px-4 py-3 border-b border-gray-100">
+          <h1 className="text-lg font-bold text-gray-800">Wayfinder</h1>
+          
+          {/* Agent Mode Toggle */}
+          <div className="flex items-center gap-2">
+            {isAgentMode && (
+              <span className="text-[10px] font-bold text-blue-600 animate-pulse uppercase tracking-wider">
+                Agentic mode active
+              </span>
+            )}
+            <button
+              onClick={() => setIsAgentMode(!isAgentMode)}
+              className={`w-10 h-10 rounded-full shadow-sm border transition-all duration-300 flex items-center justify-center overflow-hidden ${
+                isAgentMode 
+                  ? 'bg-blue-50 border-blue-200 ring-2 ring-blue-100' 
+                  : 'bg-white border-gray-200 hover:bg-gray-50'
+              }`}
+              title={isAgentMode ? "Agentic mode active" : "Enable Agent Mode"}
+            >
+              <img 
+                src="/src/icons/adk.png" 
+                alt="ADK Agent" 
+                className={`w-6 h-6 object-contain ${isAgentMode ? 'brightness-100' : 'grayscale-[0.8] opacity-60'}`}
+                referrerPolicy="no-referrer"
+              />
+            </button>
+          </div>
         </header>
         
         <div className="message-history">
@@ -696,6 +741,7 @@ RETURN
       {/* Right Panel: Map UI */}
       <div className="map-panel">
         <Legend />
+        
         <FloorPicker 
           levels={levels} 
           selectedLevelId={selectedLevelId} 
