@@ -462,8 +462,10 @@ RETURN
                   ? `\n\nService Account: ${errorData.serviceAccount}\nHint: Ensure this service account has 'Vertex AI User' role on project 464794370950.`
                   : `\n\nHint: If you see PERMISSION_DENIED, ensure the service account has Vertex AI User permissions.`;
                 
+                const backendHint = errorData.hint ? `\n\n💡 HINT: ${errorData.hint}` : "";
+                
                 const detailsText = isAgent 
-                  ? `--- AGENT ERROR ---\n${JSON.stringify(errorData, null, 2)}${saHint}`
+                  ? `--- AGENT ERROR ---\n${JSON.stringify(errorData, null, 2)}${saHint}${backendHint}`
                   : `--- GQL QUERY ---\n${gqlQuery}\n\n--- ERROR RESPONSE ---\n${JSON.stringify(errorData, null, 2)}`;
                 
                 setMessages(prev => [...prev, {
@@ -635,11 +637,13 @@ RETURN
             ? `\n\nService Account: ${errorData.serviceAccount}\nHint: Ensure this service account has 'Vertex AI User' role on project 464794370950.`
             : `\n\nHint: If you see PERMISSION_DENIED, ensure the service account has Vertex AI User permissions.`;
           
+          const backendHint = errorData.hint ? `\n\n💡 HINT: ${errorData.hint}` : "";
+
           setMessages(prev => [...prev, {
             id: Date.now().toString(),
             text: `❌ Agent error: ${errorMsg}${errorCode}`,
             sender: 'ai',
-            details: `--- AGENT ERROR ---\n${JSON.stringify(errorData, null, 2)}${saHint}`
+            details: `--- AGENT ERROR ---\n${JSON.stringify(errorData, null, 2)}${saHint}${backendHint}`
           }]);
         }
       } catch (err: any) {
