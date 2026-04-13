@@ -384,6 +384,35 @@ async function startServer() {
     }
   });
 
+  // --- API Endpoint: General Agent Chat (Reasoning Engine) ---
+  app.post("/api/agent-chat", async (req, res) => {
+    const { message } = req.body;
+    const reasoningEngineId = "1865942150835863552";
+    const project = "464794370950";
+    const location = "us-central1";
+
+    if (!message) {
+      return res.status(400).json({ error: "message is required" });
+    }
+
+    try {
+      const vertexAI = new VertexAI({ project, location });
+      const reasoningEngine = (vertexAI as any).preview.getReasoningEngine(reasoningEngineId);
+      
+      const response = await reasoningEngine.query({
+        input: message
+      });
+
+      res.json({
+        output: response.output,
+        source: "agent_engine"
+      });
+    } catch (error: any) {
+      console.error("Error in /api/agent-chat:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
