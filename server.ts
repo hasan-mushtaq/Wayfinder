@@ -7,6 +7,7 @@ import { Spanner } from "@google-cloud/spanner";
 import { VertexAI } from "@google-cloud/vertexai";
 import { ReasoningEngineExecutionServiceClient } from "@google-cloud/aiplatform";
 import { GoogleAuth } from "google-auth-library";
+import { Client as VertexClient } from "@google-cloud/vertexai";
 import cors from "cors";
 import wellknown from "wellknown";
 
@@ -370,16 +371,52 @@ async function startServer() {
       } catch (e) {
         console.log("Could not determine current identity");
       }
+      (req as any).currentIdentity = currentIdentity;
+
+      const inputPayload = { 
+        input: `Find the shortest route from node ${startNodeId} to node ${endNodeId}. Return the route as a JSON object with 'nodes' and 'coordinates' fields compatible with the existing routing API.` 
+      };
+
+      // Try experimental client
+      try {
+        const vertexClient = new VertexClient({ project, location });
+        const name = `projects/${project}/locations/${location}/reasoningEngines/${reasoningEngineId}`;
+        
+        console.log("Attempting route query via experimental VertexClient...");
+        const response = await (vertexClient as any).agentEnginesInternal.queryInternal({
+          name,
+          input: inputPayload
+        });
+
+        console.log("Reasoning Engine route response received via VertexClient.");
+        let result = response.output;
+        if (typeof result === 'string') {
+          try {
+            const jsonMatch = result.match(/```json\n([\s\S]*?)\n```/) || result.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              result = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+            }
+          } catch (e) {
+            console.warn("Failed to parse agent output as JSON:", result);
+          }
+        }
+        return res.json({
+          ...result,
+          source: "agent_engine_experimental"
+        });
+      } catch (experimentalError: any) {
+        console.warn("Experimental VertexClient failed for route, falling back:", experimentalError.message);
+        if (experimentalError.message.includes("method `query` not found")) {
+           throw experimentalError; 
+        }
+      }
 
       const client = new ReasoningEngineExecutionServiceClient(clientConfig);
-
       const name = `projects/${project}/locations/${location}/reasoningEngines/${reasoningEngineId}`;
       
       const [response] = await (client as any).queryReasoningEngine({
         name,
-        input: {
-          input: `Find the shortest route from node ${startNodeId} to node ${endNodeId}. Return the route as a JSON object with 'nodes' and 'coordinates' fields compatible with the existing routing API.`
-        }
+        input: inputPayload
       });
 
       console.log("Reasoning Engine route response received successfully.");
@@ -402,17 +439,26 @@ async function startServer() {
         source: "agent_engine"
       });
     } catch (error: any) {
+      let errorMessage = error.message;
+      let hint = "";
+      
+      if (errorMessage.includes("method `query` not found")) {
+        hint = "The Reasoning Engine exists but does not expose a 'query' method. This often happens if the agent was deployed with a class that lacks a 'query' method, or if it's a different type of agent (e.g. LangChain with sessions). Available methods were: " + (error.details || "Check logs");
+      }
+
       console.error("Detailed Error in /api/agent-route:", {
         message: error.message,
         stack: error.stack,
         code: error.code,
-        details: error.details
+        details: error.details,
+        hint
       });
       res.status(500).json({ 
-        error: error.message,
+        error: errorMessage,
         details: error.stack,
         code: error.code,
-        serviceAccount: (req as any).currentIdentity || "Unknown"
+        serviceAccount: (req as any).currentIdentity || "Unknown",
+        hint
       });
     }
   });
@@ -447,8 +493,32 @@ async function startServer() {
       }
       (req as any).currentIdentity = currentIdentity;
 
-      const client = new ReasoningEngineExecutionServiceClient(clientConfig);
+      // Try using the experimental VertexClient first as it might have better compatibility
+      try {
+        const vertexClient = new VertexClient({ project, location });
+        const name = `projects/${project}/locations/${location}/reasoningEngines/${reasoningEngineId}`;
+        
+        console.log("Attempting query via experimental VertexClient...");
+        const response = await (vertexClient as any).agentEnginesInternal.queryInternal({
+          name,
+          input: { input: message }
+        });
 
+        console.log("Reasoning Engine chat response received via VertexClient.");
+        return res.json({
+          output: response.output,
+          source: "agent_engine_experimental"
+        });
+      } catch (experimentalError: any) {
+        console.warn("Experimental VertexClient failed, falling back to standard client:", experimentalError.message);
+        
+        // If it's a "method not found" error, we should report it clearly
+        if (experimentalError.message.includes("method `query` not found")) {
+           throw experimentalError; 
+        }
+      }
+
+      const client = new ReasoningEngineExecutionServiceClient(clientConfig);
       const name = `projects/${project}/locations/${location}/reasoningEngines/${reasoningEngineId}`;
 
       const [response] = await (client as any).queryReasoningEngine({
@@ -464,17 +534,26 @@ async function startServer() {
         source: "agent_engine"
       });
     } catch (error: any) {
+      let errorMessage = error.message;
+      let hint = "";
+      
+      if (errorMessage.includes("method `query` not found")) {
+        hint = "The Reasoning Engine exists but does not expose a 'query' method. This often happens if the agent was deployed with a class that lacks a 'query' method, or if it's a different type of agent (e.g. LangChain with sessions). Available methods were: " + (error.details || "Check logs");
+      }
+
       console.error("Detailed Error in /api/agent-chat:", {
         message: error.message,
         stack: error.stack,
         code: error.code,
-        details: error.details
+        details: error.details,
+        hint
       });
       res.status(500).json({ 
-        error: error.message,
+        error: errorMessage,
         details: error.stack,
         code: error.code,
-        serviceAccount: (req as any).currentIdentity || "Unknown"
+        serviceAccount: (req as any).currentIdentity || "Unknown",
+        hint
       });
     }
   });
