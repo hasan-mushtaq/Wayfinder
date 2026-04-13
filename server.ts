@@ -4,6 +4,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { Spanner } from "@google-cloud/spanner";
+import { VertexAI } from "@google-cloud/vertexai";
 import cors from "cors";
 import wellknown from "wellknown";
 
@@ -336,6 +337,50 @@ async function startServer() {
         error: error.message,
         details: "Routing requires a live Spanner Graph connection with the 'indoorRoutingGraph' defined."
       });
+    }
+  });
+
+  // --- API Endpoint: Get Route via Agent (Reasoning Engine) ---
+  app.post("/api/agent-route", async (req, res) => {
+    const { startNodeId, endNodeId } = req.body;
+    const reasoningEngineId = "1865942150835863552";
+    const project = "464794370950";
+    const location = "us-central1";
+
+    if (!startNodeId || !endNodeId) {
+      return res.status(400).json({ error: "startNodeId and endNodeId are required" });
+    }
+
+    try {
+      const vertexAI = new VertexAI({ project, location });
+      // Use preview for reasoning engines
+      const reasoningEngine = (vertexAI as any).preview.getReasoningEngine(reasoningEngineId);
+      
+      const response = await reasoningEngine.query({
+        input: `Find the shortest route from node ${startNodeId} to node ${endNodeId}. Return the route as a JSON object with 'nodes' and 'coordinates' fields compatible with the existing routing API.`
+      });
+
+      let result = response.output;
+      
+      // If the result is a string, try to parse it as JSON
+      if (typeof result === 'string') {
+        try {
+          const jsonMatch = result.match(/```json\n([\s\S]*?)\n```/) || result.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            result = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+          }
+        } catch (e) {
+          console.warn("Failed to parse agent output as JSON:", result);
+        }
+      }
+
+      res.json({
+        ...result,
+        source: "agent_engine"
+      });
+    } catch (error: any) {
+      console.error("Error in /api/agent-route:", error.message);
+      res.status(500).json({ error: error.message });
     }
   });
 
