@@ -592,7 +592,7 @@ RETURN
     }
   }, []);
 
-  const handleChatSubmit = (e?: React.FormEvent) => {
+  const handleChatSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!inputValue.trim()) return;
 
@@ -603,24 +603,48 @@ RETURN
     };
 
     setMessages(prev => [...prev, userMessage]);
+    const currentInput = inputValue;
     setInputValue('');
 
-    // Simulate AI Response
-    setTimeout(() => {
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: "I'm calculating the best route to the T-Rex exhibit for you. Please follow the red line on the map.",
-        sender: 'ai'
-      };
-      setMessages(prev => [...prev, aiMessage]);
-      
-      // Draw a sample route line
-      drawRouteLine([
-        { lat: 37.329, lng: -121.888 },
-        { lat: 37.3295, lng: -121.8885 },
-        { lat: 37.330, lng: -121.888 }
-      ]);
-    }, 1000);
+    if (isAgentModeRef.current) {
+      try {
+        const response = await fetch('/api/agent-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: currentInput })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const aiMessage: Message = {
+            id: Date.now().toString(),
+            text: data.output,
+            sender: 'ai',
+            details: `--- AGENT RESPONSE ---\n${JSON.stringify(data, null, 2)}`
+          };
+          setMessages(prev => [...prev, aiMessage]);
+        } else {
+          throw new Error('Agent chat failed');
+        }
+      } catch (err: any) {
+        console.error("Agent chat error:", err);
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          text: `❌ Agent error: ${err.message}`,
+          sender: 'ai'
+        }]);
+      }
+    } else {
+      // Simulate AI Response for non-agent mode
+      setTimeout(() => {
+        const aiMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: "I'm your Wayfinder assistant. I can help you find locations on the map. Try clicking a destination to see the route!",
+          sender: 'ai'
+        };
+        setMessages(prev => [...prev, aiMessage]);
+      }, 1000);
+    }
   };
 
   const drawRouteLine = (coordinates: { lat: number; lng: number }[]) => {
@@ -693,7 +717,7 @@ RETURN
               title={isAgentMode ? "Agentic mode active" : "Enable Agent Mode"}
             >
               <img 
-                src="/src/icons/adk.png" 
+                src="/icons/adk.png" 
                 alt="ADK Agent" 
                 className={`w-6 h-6 object-contain ${isAgentMode ? 'brightness-100' : 'grayscale-[0.8] opacity-60'}`}
                 referrerPolicy="no-referrer"
