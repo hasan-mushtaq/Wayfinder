@@ -5,6 +5,8 @@ import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { Spanner } from "@google-cloud/spanner";
 import { VertexAI } from "@google-cloud/vertexai";
+import { ReasoningEngineExecutionServiceClient } from "@google-cloud/aiplatform";
+import { GoogleAuth } from "google-auth-library";
 import cors from "cors";
 import wellknown from "wellknown";
 
@@ -352,14 +354,35 @@ async function startServer() {
     }
 
     try {
-      const vertexAI = new VertexAI({ project, location });
-      // Use preview for reasoning engines
-      const reasoningEngine = (vertexAI as any).preview.getReasoningEngine(reasoningEngineId);
+      console.log(`Querying Reasoning Engine ${reasoningEngineId} for route...`);
       
-      const response = await reasoningEngine.query({
-        input: `Find the shortest route from node ${startNodeId} to node ${endNodeId}. Return the route as a JSON object with 'nodes' and 'coordinates' fields compatible with the existing routing API.`
+      const auth = new GoogleAuth();
+      const clientConfig: any = {
+        apiEndpoint: `${location}-aiplatform.googleapis.com`,
+        projectId: project,
+      };
+      
+      let currentIdentity = "Unknown";
+      try {
+        const credentials = await auth.getCredentials();
+        currentIdentity = credentials.client_email || "Default Service Account";
+        console.log(`Current Identity: ${currentIdentity}`);
+      } catch (e) {
+        console.log("Could not determine current identity");
+      }
+
+      const client = new ReasoningEngineExecutionServiceClient(clientConfig);
+
+      const name = `projects/${project}/locations/${location}/reasoningEngines/${reasoningEngineId}`;
+      
+      const [response] = await (client as any).queryReasoningEngine({
+        name,
+        input: {
+          input: `Find the shortest route from node ${startNodeId} to node ${endNodeId}. Return the route as a JSON object with 'nodes' and 'coordinates' fields compatible with the existing routing API.`
+        }
       });
 
+      console.log("Reasoning Engine route response received successfully.");
       let result = response.output;
       
       // If the result is a string, try to parse it as JSON
@@ -379,8 +402,18 @@ async function startServer() {
         source: "agent_engine"
       });
     } catch (error: any) {
-      console.error("Error in /api/agent-route:", error.message);
-      res.status(500).json({ error: error.message });
+      console.error("Detailed Error in /api/agent-route:", {
+        message: error.message,
+        stack: error.stack,
+        code: error.code,
+        details: error.details
+      });
+      res.status(500).json({ 
+        error: error.message,
+        details: error.stack,
+        code: error.code,
+        serviceAccount: (req as any).currentIdentity || "Unknown"
+      });
     }
   });
 
@@ -396,20 +429,53 @@ async function startServer() {
     }
 
     try {
-      const vertexAI = new VertexAI({ project, location });
-      const reasoningEngine = (vertexAI as any).preview.getReasoningEngine(reasoningEngineId);
+      console.log(`Querying Reasoning Engine ${reasoningEngineId} for chat...`);
       
-      const response = await reasoningEngine.query({
-        input: message
+      const auth = new GoogleAuth();
+      const clientConfig: any = {
+        apiEndpoint: `${location}-aiplatform.googleapis.com`,
+        projectId: project,
+      };
+
+      let currentIdentity = "Unknown";
+      try {
+        const credentials = await auth.getCredentials();
+        currentIdentity = credentials.client_email || "Default Service Account";
+        console.log(`Current Identity: ${currentIdentity}`);
+      } catch (e) {
+        console.log("Could not determine current identity");
+      }
+      (req as any).currentIdentity = currentIdentity;
+
+      const client = new ReasoningEngineExecutionServiceClient(clientConfig);
+
+      const name = `projects/${project}/locations/${location}/reasoningEngines/${reasoningEngineId}`;
+
+      const [response] = await (client as any).queryReasoningEngine({
+        name,
+        input: {
+          input: message
+        }
       });
 
+      console.log("Reasoning Engine chat response received successfully.");
       res.json({
         output: response.output,
         source: "agent_engine"
       });
     } catch (error: any) {
-      console.error("Error in /api/agent-chat:", error.message);
-      res.status(500).json({ error: error.message });
+      console.error("Detailed Error in /api/agent-chat:", {
+        message: error.message,
+        stack: error.stack,
+        code: error.code,
+        details: error.details
+      });
+      res.status(500).json({ 
+        error: error.message,
+        details: error.stack,
+        code: error.code,
+        serviceAccount: (req as any).currentIdentity || "Unknown"
+      });
     }
   });
 
