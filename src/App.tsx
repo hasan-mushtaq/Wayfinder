@@ -43,6 +43,7 @@ export default function App() {
   const [isAgentMode, setIsAgentMode] = useState(false);
   const [agentId, setAgentId] = useState("1865942150835863552");
   const [agentMethod, setAgentMethod] = useState("query");
+  const [agentHints, setAgentHints] = useState<string | null>(null);
   const isAgentModeRef = useRef(false);
   
   useEffect(() => {
@@ -565,6 +566,10 @@ RETURN
                   ? `--- AGENT RESPONSE ---\n${JSON.stringify(data, null, 2)}`
                   : `--- GQL QUERY ---\n${gqlQuery}\n\n--- GQL RESPONSE ---\n${JSON.stringify(data, null, 2)}`;
                 
+                if (isAgent && data.hint) {
+                  setAgentHints(data.hint);
+                }
+
                 setMessages(prev => [...prev, {
                   id: Date.now().toString(),
                   text: `❌ No route found between these points.`,
@@ -574,13 +579,22 @@ RETURN
               }
             } catch (err: any) {
               console.error("Routing error:", err);
+              
+              // Try to parse error message if it's JSON (our backend error format)
+              let parsedError = err.message;
+              try {
+                const json = JSON.parse(err.message);
+                if (json.hint) setAgentHints(json.hint);
+                parsedError = json.error || err.message;
+              } catch (e) {}
+
               const detailsText = isAgent
                 ? `--- AGENT ERROR ---\n${err.message}`
                 : `--- GQL QUERY ---\n${gqlQuery}${err.details ? `\n\n--- ERROR ---\n${err.details}` : ''}`;
               
               setMessages(prev => [...prev, {
                 id: Date.now().toString(),
-                text: `❌ Could not find a route: ${err.message}`,
+                text: `❌ Could not find a route: ${parsedError}`,
                 sender: 'ai',
                 details: detailsText
               }]);
@@ -633,6 +647,7 @@ RETURN
 
         if (response.ok) {
           const data = await response.json();
+          if (data.hint) setAgentHints(data.hint);
           const aiMessage: Message = {
             id: Date.now().toString(),
             text: data.output,
@@ -642,6 +657,7 @@ RETURN
           setMessages(prev => [...prev, aiMessage]);
         } else {
           const errorData = await response.json();
+          if (errorData.hint) setAgentHints(errorData.hint);
           const errorMsg = errorData.error || 'Agent chat failed';
           const errorCode = errorData.code ? ` (Code: ${errorData.code})` : '';
           const saHint = errorData.serviceAccount 
@@ -805,6 +821,29 @@ RETURN
                 />
               </div>
             </div>
+            {agentHints && (
+              <div className="p-2 bg-white border border-blue-100 rounded text-[10px] text-blue-700">
+                <div className="font-bold mb-1 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+                  Detected Methods:
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {agentHints.split(', ').map(method => (
+                    <button 
+                      key={method}
+                      onClick={() => setAgentMethod(method)}
+                      className={`px-1.5 py-0.5 rounded border transition-colors ${
+                        agentMethod === method 
+                          ? 'bg-blue-600 border-blue-600 text-white' 
+                          : 'bg-blue-50 border-blue-100 hover:bg-blue-100'
+                      }`}
+                    >
+                      {method}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
