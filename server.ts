@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { Spanner } from "@google-cloud/spanner";
 import { VertexAI } from "@google-cloud/vertexai";
-import { ReasoningEngineExecutionServiceClient } from "@google-cloud/aiplatform";
+import { ReasoningEngineExecutionServiceClient, ReasoningEngineServiceClient } from "@google-cloud/aiplatform";
 import { GoogleAuth } from "google-auth-library";
 import { Client as VertexClient } from "@google-cloud/vertexai";
 import cors from "cors";
@@ -345,10 +345,15 @@ async function startServer() {
 
   // --- API Endpoint: Get Route via Agent (Reasoning Engine) ---
   app.post("/api/agent-route", async (req, res) => {
-    const { startNodeId, endNodeId } = req.body;
-    const reasoningEngineId = "1865942150835863552";
+    const { startNodeId, endNodeId, agentId: customAgentId, method: customMethod } = req.body;
+    const reasoningEngineId = customAgentId || "1865942150835863552";
+    const classMethod = customMethod || "query";
     const project = "464794370950";
     const location = "us-central1";
+    const clientConfig: any = {
+      apiEndpoint: `${location}-aiplatform.googleapis.com`,
+      projectId: project,
+    };
 
     if (!startNodeId || !endNodeId) {
       return res.status(400).json({ error: "startNodeId and endNodeId are required" });
@@ -358,10 +363,6 @@ async function startServer() {
       console.log(`Querying Reasoning Engine ${reasoningEngineId} for route...`);
       
       const auth = new GoogleAuth();
-      const clientConfig: any = {
-        apiEndpoint: `${location}-aiplatform.googleapis.com`,
-        projectId: project,
-      };
       
       let currentIdentity = "Unknown";
       try {
@@ -382,10 +383,13 @@ async function startServer() {
         const vertexClient = new VertexClient({ project, location });
         const name = `projects/${project}/locations/${location}/reasoningEngines/${reasoningEngineId}`;
         
-        console.log("Attempting route query via experimental VertexClient...");
+        console.log(`Attempting route query via experimental VertexClient using method ${classMethod}...`);
         const response = await (vertexClient as any).agentEnginesInternal.queryInternal({
           name,
-          input: inputPayload
+          config: {
+            input: inputPayload,
+            classMethod: classMethod
+          }
         });
 
         console.log("Reasoning Engine route response received via VertexClient.");
@@ -416,7 +420,8 @@ async function startServer() {
       
       const [response] = await (client as any).queryReasoningEngine({
         name,
-        input: inputPayload
+        input: inputPayload,
+        classMethod: classMethod
       });
 
       console.log("Reasoning Engine route response received successfully.");
@@ -441,9 +446,23 @@ async function startServer() {
     } catch (error: any) {
       let errorMessage = error.message;
       let hint = "";
+      let availableMethods: any[] = [];
+      
+      // Try to fetch reasoning engine details for better debugging
+      try {
+        const adminClient = new ReasoningEngineServiceClient(clientConfig);
+        const [engine] = await adminClient.getReasoningEngine({ name: `projects/${project}/locations/${location}/reasoningEngines/${reasoningEngineId}` });
+        console.log("Fetched Reasoning Engine Details:", JSON.stringify(engine, null, 2));
+        if (engine.spec && (engine.spec as any).classMethods) {
+          availableMethods = (engine.spec as any).classMethods;
+        }
+      } catch (adminError) {
+        console.warn("Could not fetch reasoning engine details:", adminError);
+      }
       
       if (errorMessage.includes("method `query` not found")) {
-        hint = "The Reasoning Engine exists but does not expose a 'query' method. This often happens if the agent was deployed with a class that lacks a 'query' method, or if it's a different type of agent (e.g. LangChain with sessions). Available methods were: " + (error.details || "Check logs");
+        hint = "The Reasoning Engine exists but does not expose a 'query' method. Available methods from spec: " + 
+               (availableMethods.length > 0 ? availableMethods.map(m => m.name || JSON.stringify(m)).join(", ") : "None found in spec");
       }
 
       console.error("Detailed Error in /api/agent-route:", {
@@ -465,10 +484,15 @@ async function startServer() {
 
   // --- API Endpoint: General Agent Chat (Reasoning Engine) ---
   app.post("/api/agent-chat", async (req, res) => {
-    const { message } = req.body;
-    const reasoningEngineId = "1865942150835863552";
+    const { message, agentId: customAgentId, method: customMethod } = req.body;
+    const reasoningEngineId = customAgentId || "1865942150835863552";
+    const classMethod = customMethod || "query";
     const project = "464794370950";
     const location = "us-central1";
+    const clientConfig: any = {
+      apiEndpoint: `${location}-aiplatform.googleapis.com`,
+      projectId: project,
+    };
 
     if (!message) {
       return res.status(400).json({ error: "message is required" });
@@ -478,10 +502,6 @@ async function startServer() {
       console.log(`Querying Reasoning Engine ${reasoningEngineId} for chat...`);
       
       const auth = new GoogleAuth();
-      const clientConfig: any = {
-        apiEndpoint: `${location}-aiplatform.googleapis.com`,
-        projectId: project,
-      };
 
       let currentIdentity = "Unknown";
       try {
@@ -498,10 +518,13 @@ async function startServer() {
         const vertexClient = new VertexClient({ project, location });
         const name = `projects/${project}/locations/${location}/reasoningEngines/${reasoningEngineId}`;
         
-        console.log("Attempting query via experimental VertexClient...");
+        console.log(`Attempting query via experimental VertexClient using method ${classMethod}...`);
         const response = await (vertexClient as any).agentEnginesInternal.queryInternal({
           name,
-          input: { input: message }
+          config: {
+            input: { input: message },
+            classMethod: classMethod
+          }
         });
 
         console.log("Reasoning Engine chat response received via VertexClient.");
@@ -525,7 +548,8 @@ async function startServer() {
         name,
         input: {
           input: message
-        }
+        },
+        classMethod: classMethod
       });
 
       console.log("Reasoning Engine chat response received successfully.");
@@ -536,9 +560,23 @@ async function startServer() {
     } catch (error: any) {
       let errorMessage = error.message;
       let hint = "";
+      let availableMethods: any[] = [];
+
+      // Try to fetch reasoning engine details for better debugging
+      try {
+        const adminClient = new ReasoningEngineServiceClient(clientConfig);
+        const [engine] = await adminClient.getReasoningEngine({ name: `projects/${project}/locations/${location}/reasoningEngines/${reasoningEngineId}` });
+        console.log("Fetched Reasoning Engine Details:", JSON.stringify(engine, null, 2));
+        if (engine.spec && (engine.spec as any).classMethods) {
+          availableMethods = (engine.spec as any).classMethods;
+        }
+      } catch (adminError) {
+        console.warn("Could not fetch reasoning engine details:", adminError);
+      }
       
       if (errorMessage.includes("method `query` not found")) {
-        hint = "The Reasoning Engine exists but does not expose a 'query' method. This often happens if the agent was deployed with a class that lacks a 'query' method, or if it's a different type of agent (e.g. LangChain with sessions). Available methods were: " + (error.details || "Check logs");
+        hint = "The Reasoning Engine exists but does not expose a 'query' method. Available methods from spec: " + 
+               (availableMethods.length > 0 ? availableMethods.map(m => m.name || JSON.stringify(m)).join(", ") : "None found in spec");
       }
 
       console.error("Detailed Error in /api/agent-chat:", {
