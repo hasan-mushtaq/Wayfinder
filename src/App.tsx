@@ -41,6 +41,8 @@ export default function App() {
 
   const [selectedLevelId, setSelectedLevelId] = useState<string | null>(null);
   const [isAgentMode, setIsAgentMode] = useState(false);
+  const [agentId, setAgentId] = useState("1865942150835863552");
+  const [agentMethod, setAgentMethod] = useState("query");
   const isAgentModeRef = useRef(false);
   
   useEffect(() => {
@@ -453,7 +455,12 @@ RETURN
               const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ startNodeId, endNodeId: destinationId })
+                body: JSON.stringify({ 
+                  startNodeId, 
+                  endNodeId: destinationId,
+                  agentId,
+                  method: agentMethod
+                })
               });
 
               if (!response.ok) {
@@ -617,7 +624,11 @@ RETURN
         const response = await fetch('/api/agent-chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: currentInput })
+          body: JSON.stringify({ 
+            message: currentInput,
+            agentId,
+            method: agentMethod
+          })
         });
 
         if (response.ok) {
@@ -771,6 +782,31 @@ RETURN
           ))}
           <div ref={messageEndRef} />
         </div>
+
+        {isAgentMode && (
+          <div className="px-4 py-2 bg-blue-50 border-t border-blue-100 space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="flex-1">
+                <label className="text-[9px] font-bold text-blue-800 uppercase tracking-wider block mb-0.5">Engine ID</label>
+                <input 
+                  type="text" 
+                  value={agentId}
+                  onChange={(e) => setAgentId(e.target.value)}
+                  className="w-full px-2 py-1 text-[11px] bg-white border border-blue-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+                />
+              </div>
+              <div className="w-24">
+                <label className="text-[9px] font-bold text-blue-800 uppercase tracking-wider block mb-0.5">Method</label>
+                <input 
+                  type="text" 
+                  value={agentMethod}
+                  onChange={(e) => setAgentMethod(e.target.value)}
+                  className="w-full px-2 py-1 text-[11px] bg-white border border-blue-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+                />
+              </div>
+            </div>
+          </div>
+        )}
 
         <form className="chat-input-area" onSubmit={handleChatSubmit}>
           <input 
