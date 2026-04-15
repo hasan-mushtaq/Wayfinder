@@ -499,20 +499,46 @@ async function startServer() {
         
         // Let's print the first 250 characters of the decoded text so we can see exactly 
         // how the ADK agent formats its response (e.g., raw text vs Server-Sent Events)
-        console.log("RAW DECODED TEXT PREVIEW:", fullOutput.substring(0, 250));
+       console.log(`Stream complete. Received ${chunkCount} chunks. Total text length: ${fullOutput.length}`);
 
-        console.log("Reasoning Engine route response received via streaming.");
-        let result = fullOutput;
-        try {
-          const jsonMatch = result.match(/```json\n([\s\S]*?)\n```/) || result.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            result = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+        // --- AGENT TRACE PARSER ---
+        let humanText = "";
+        let extractedRouteData = null;
+
+        // The stream returns JSON Lines (NDJSON). We split by newline to parse each step.
+        const lines = fullOutput.split('\n');
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const parsed = JSON.parse(line);
+            const parts = parsed.content?.parts || [];
+
+            for (const part of parts) {
+              // 1. Extract the human-readable conversational text
+              if (part.text) {
+                humanText += part.text;
+              }
+
+              // 2. (Optional) Extract the hidden Spanner Graph data if the map needs it to draw the line
+              if (part.function_response?.name === "find_shortest_route") {
+                const resultString = part.function_response.response?.result;
+                if (resultString) {
+                  extractedRouteData = JSON.parse(resultString);
+                }
+              }
+            }
+          } catch (e) {
+            // Ignore partial or unparseable lines
           }
-        } catch (e) {
-          console.warn("Failed to parse agent output as JSON:", result);
         }
+
+        // Clean up any weird formatting characters the agent might include
+        humanText = humanText.trim().replace(/\\n/g, '\n');
+
         return {
-          ...(typeof result === 'object' ? result : { output: result }),
+          output: humanText || fullOutput, // Fallback to raw if parser finds nothing
+          routeData: extractedRouteData,   // Passes the raw graph JSON to your frontend map
           source: "agent_engine_stream"
         };
       };
@@ -695,14 +721,45 @@ async function startServer() {
         }
 
         console.log(`Stream complete. Received ${chunkCount} chunks. Total text length: ${fullOutput.length}`);
-        
-        // Let's print the first 250 characters of the decoded text so we can see exactly 
-        // how the ADK agent formats its response (e.g., raw text vs Server-Sent Events)
-        console.log("RAW DECODED TEXT PREVIEW:", fullOutput.substring(0, 250));
 
-        console.log("Reasoning Engine chat response received via streaming.");
+        // --- AGENT TRACE PARSER ---
+        let humanText = "";
+        let extractedRouteData = null;
+
+        // The stream returns JSON Lines (NDJSON). We split by newline to parse each step.
+        const lines = fullOutput.split('\n');
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const parsed = JSON.parse(line);
+            const parts = parsed.content?.parts || [];
+
+            for (const part of parts) {
+              // 1. Extract the human-readable conversational text
+              if (part.text) {
+                humanText += part.text;
+              }
+
+              // 2. (Optional) Extract the hidden Spanner Graph data if the map needs it to draw the line
+              if (part.function_response?.name === "find_shortest_route") {
+                const resultString = part.function_response.response?.result;
+                if (resultString) {
+                  extractedRouteData = JSON.parse(resultString);
+                }
+              }
+            }
+          } catch (e) {
+            // Ignore partial or unparseable lines
+          }
+        }
+
+        // Clean up any weird formatting characters the agent might include
+        humanText = humanText.trim().replace(/\\n/g, '\n');
+
         return {
-          output: fullOutput,
+          output: humanText || fullOutput, // Fallback to raw if parser finds nothing
+          routeData: extractedRouteData,   // Passes the raw graph JSON to your frontend map
           source: "agent_engine_stream"
         };
       };
