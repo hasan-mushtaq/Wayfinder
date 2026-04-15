@@ -92,7 +92,19 @@ async function getOrCreateAgentSession(client: any, name: string, userId: string
     classMethod: "create_session"
   });
 
-  const sessionId = response.output?.id || response.id;
+  let output = response.output;
+  if (typeof output === 'string') {
+    try {
+      const jsonMatch = output.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        output = JSON.parse(jsonMatch[0]);
+      }
+    } catch (e) {
+      console.warn("Failed to parse create_session output as JSON:", output);
+    }
+  }
+
+  const sessionId = output?.id || response.id;
   if (!sessionId) {
     throw new Error("Failed to create agent session: No session ID returned");
   }
@@ -480,17 +492,19 @@ async function startServer() {
           source: "agent_engine"
         });
       } catch (unaryError: any) {
-        console.warn("Unary route query failed:", unaryError.message);
+        const errorString = (unaryError.message || "") + (unaryError.details || "");
+        console.warn("Unary route query failed:", unaryError.message, "Details:", unaryError.details);
         
         // If it's the default 'query' method and it's not found, try streaming as a fallback
-        if (classMethod === "query" && unaryError.message.includes("method `query` not found")) {
+        // We check both message and details as different SDK versions/errors put the info in different places
+        if (classMethod === "query" && (errorString.includes("method `query` not found") || errorString.includes("method 'query' not found"))) {
           console.log("Method 'query' not found, attempting ADK-style streaming fallback...");
           try {
             const client = new ReasoningEngineExecutionServiceClient(clientConfig);
             const result = await executeStreaming(client);
             return res.json(result);
           } catch (streamError: any) {
-            console.error("Streaming fallback also failed:", streamError.message);
+            console.error("Streaming fallback also failed:", streamError.message, streamError.details);
             throw unaryError; // Throw the original error if fallback also fails
           }
         }
@@ -621,17 +635,18 @@ async function startServer() {
           source: "agent_engine"
         });
       } catch (unaryError: any) {
-        console.warn("Unary chat query failed:", unaryError.message);
+        const errorString = (unaryError.message || "") + (unaryError.details || "");
+        console.warn("Unary chat query failed:", unaryError.message, "Details:", unaryError.details);
 
         // If it's the default 'query' method and it's not found, try streaming as a fallback
-        if (classMethod === "query" && unaryError.message.includes("method `query` not found")) {
+        if (classMethod === "query" && (errorString.includes("method `query` not found") || errorString.includes("method 'query' not found"))) {
           console.log("Method 'query' not found, attempting ADK-style streaming fallback...");
           try {
             const client = new ReasoningEngineExecutionServiceClient(clientConfig);
             const result = await executeStreaming(client);
             return res.json(result);
           } catch (streamError: any) {
-            console.error("Streaming fallback also failed:", streamError.message);
+            console.error("Streaming fallback also failed:", streamError.message, streamError.details);
             throw unaryError; // Throw the original error if fallback also fails
           }
         }
