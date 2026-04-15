@@ -472,7 +472,7 @@ async function startServer() {
         const [response] = await (client as any).queryReasoningEngine({
           name,
           input: inputPayload,
-          class_method: classMethod
+          classMethod: classMethod // Standard client uses camelCase
         });
 
         console.log("Reasoning Engine route response received successfully.");
@@ -500,7 +500,11 @@ async function startServer() {
         
         // If it's the default 'query' method and it's not found, try streaming as a fallback
         // We check both message and details as different SDK versions/errors put the info in different places
-        if (classMethod === "query" && (errorString.includes("method `query` not found") || errorString.includes("method 'query' not found"))) {
+        const isMethodNotFound = errorString.toLowerCase().includes("method query not found") || 
+                               errorString.toLowerCase().includes("method `query` not found") ||
+                               errorString.toLowerCase().includes("method 'query' not found");
+                               
+        if (classMethod === "query" && isMethodNotFound) {
           console.log("Method 'query' not found, attempting ADK-style streaming fallback...");
           try {
             const client = new ReasoningEngineExecutionServiceClient(clientConfig);
@@ -629,7 +633,7 @@ async function startServer() {
           input: {
             message: message
           },
-          class_method: classMethod
+          classMethod: classMethod // Standard client uses camelCase
         });
 
         console.log("Reasoning Engine chat response received successfully.");
@@ -642,7 +646,11 @@ async function startServer() {
         console.warn("Unary chat query failed:", unaryError.message, "Details:", unaryError.details);
 
         // If it's the default 'query' method and it's not found, try streaming as a fallback
-        if (classMethod === "query" && (errorString.includes("method `query` not found") || errorString.includes("method 'query' not found"))) {
+        const isMethodNotFound = errorString.toLowerCase().includes("method query not found") || 
+                               errorString.toLowerCase().includes("method `query` not found") ||
+                               errorString.toLowerCase().includes("method 'query' not found");
+
+        if (classMethod === "query" && isMethodNotFound) {
           console.log("Method 'query' not found, attempting ADK-style streaming fallback...");
           try {
             const client = new ReasoningEngineExecutionServiceClient(clientConfig);
