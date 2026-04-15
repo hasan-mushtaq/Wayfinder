@@ -76,6 +76,32 @@ process.on("uncaughtException", (error: any) => {
   process.exit(1);
 });
 
+// --- Reasoning Engine Session Management ---
+const agentSessions: Record<string, string> = {};
+
+async function getOrCreateAgentSession(client: any, name: string, userId: string): Promise<string> {
+  const sessionKey = `${name}:${userId}`;
+  if (agentSessions[sessionKey]) {
+    return agentSessions[sessionKey];
+  }
+
+  console.log(`Creating new session for user ${userId} on agent ${name}...`);
+  const [response] = await client.queryReasoningEngine({
+    name,
+    input: { user_id: userId },
+    classMethod: "create_session"
+  });
+
+  const sessionId = response.output?.id || response.id;
+  if (!sessionId) {
+    throw new Error("Failed to create agent session: No session ID returned");
+  }
+
+  agentSessions[sessionKey] = sessionId;
+  console.log(`Session created: ${sessionId}`);
+  return sessionId;
+}
+
 async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
@@ -378,93 +404,26 @@ async function startServer() {
         input: `Find the shortest route from node ${startNodeId} to node ${endNodeId}. Return the route as a JSON object with 'nodes' and 'coordinates' fields compatible with the existing routing API.` 
       };
 
-      // Try experimental client
-      try {
-        const vertexClient = new VertexClient({ project, location });
-        const name = `projects/${project}/locations/${location}/reasoningEngines/${reasoningEngineId}`;
-        
-        // If the method is stream_query, use the streaming endpoint
-        if (classMethod === "stream_query" || classMethod === "async_stream_query") {
-          console.log(`Attempting streaming query via experimental VertexClient using method ${classMethod}...`);
-          const stream = await (vertexClient as any).agentEnginesInternal.streamQueryInternal({
-            name,
-            config: {
-              input: {
-                ...inputPayload,
-                message: inputPayload.input,
-                user_id: (req as any).currentIdentity || "anonymous-user"
-              },
-              classMethod: classMethod
-            }
-          });
-
-          let fullOutput = "";
-          for await (const chunk of stream) {
-            if (chunk.output) fullOutput += chunk.output;
-          }
-
-          console.log("Reasoning Engine route response received via streaming VertexClient.");
-          let result = fullOutput;
-          try {
-            const jsonMatch = result.match(/```json\n([\s\S]*?)\n```/) || result.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-              result = JSON.parse(jsonMatch[1] || jsonMatch[0]);
-            }
-          } catch (e) {
-            console.warn("Failed to parse agent output as JSON:", result);
-          }
-          return res.json({
-            ...result,
-            source: "agent_engine_experimental_stream"
-          });
-        }
-
-        console.log(`Attempting route query via experimental VertexClient using method ${classMethod}...`);
-        const response = await (vertexClient as any).agentEnginesInternal.queryInternal({
-          name,
-          config: {
-            input: inputPayload,
-            classMethod: classMethod
-          }
-        });
-
-        console.log("Reasoning Engine route response received via VertexClient.");
-        let result = response.output;
-        if (typeof result === 'string') {
-          try {
-            const jsonMatch = result.match(/```json\n([\s\S]*?)\n```/) || result.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-              result = JSON.parse(jsonMatch[1] || jsonMatch[0]);
-            }
-          } catch (e) {
-            console.warn("Failed to parse agent output as JSON:", result);
-          }
-        }
-        return res.json({
-          ...result,
-          source: "agent_engine_experimental"
-        });
-      } catch (experimentalError: any) {
-        console.warn("Experimental VertexClient failed for route, falling back:", experimentalError.message);
-        if (experimentalError.message.includes("method `query` not found")) {
-           throw experimentalError; 
-        }
-      }
-
-      const client = new ReasoningEngineExecutionServiceClient(clientConfig);
       const name = `projects/${project}/locations/${location}/reasoningEngines/${reasoningEngineId}`;
-      
-      // If the method is stream_query, use the streaming endpoint
+      const userId = (req as any).currentIdentity || `user_${Date.now()}`;
+
+      // Handle ADK-style streaming agents
       if (classMethod === "stream_query" || classMethod === "async_stream_query") {
-        console.log(`Attempting streaming query via standard client using method ${classMethod}...`);
+        const client = new ReasoningEngineExecutionServiceClient(clientConfig);
+        
+        // 1. Ensure we have a session
+        const sessionId = await getOrCreateAgentSession(client, name, userId);
+
+        // 2. Execute streaming query
+        console.log(`Attempting streaming query via standard client for session ${sessionId}...`);
         const stream = (client as any).streamQueryReasoningEngine({
           name,
           input: {
-            ...inputPayload,
-            message: inputPayload.input,
-            user_id: (req as any).currentIdentity || "anonymous-user"
-          },
-          classMethod: classMethod
+            user_id: userId,
+            session_id: sessionId,
+            message: inputPayload.input
+          }
+          // Note: We omit classMethod here as :streamQuery defaults to the main execution loop
         });
 
         let fullOutput = "";
@@ -472,7 +431,7 @@ async function startServer() {
           if (chunk.output) fullOutput += chunk.output;
         }
 
-        console.log("Reasoning Engine route response received via streaming standard client.");
+        console.log("Reasoning Engine route response received via streaming.");
         let result = fullOutput;
         try {
           const jsonMatch = result.match(/```json\n([\s\S]*?)\n```/) || result.match(/\{[\s\S]*\}/);
@@ -483,36 +442,43 @@ async function startServer() {
           console.warn("Failed to parse agent output as JSON:", result);
         }
         return res.json({
-          ...result,
+          ...(typeof result === 'object' ? result : { output: result }),
           source: "agent_engine_stream"
         });
       }
 
-      const [response] = await (client as any).queryReasoningEngine({
-        name,
-        input: inputPayload,
-        classMethod: classMethod
-      });
+      // Fallback to unary query for non-streaming agents
+      try {
+        const client = new ReasoningEngineExecutionServiceClient(clientConfig);
+        const [response] = await (client as any).queryReasoningEngine({
+          name,
+          input: inputPayload,
+          classMethod: classMethod
+        });
 
-      console.log("Reasoning Engine route response received successfully.");
-      let result = response.output;
-      
-      // If the result is a string, try to parse it as JSON
-      if (typeof result === 'string') {
-        try {
-          const jsonMatch = result.match(/```json\n([\s\S]*?)\n```/) || result.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            result = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+        console.log("Reasoning Engine route response received successfully.");
+        let result = response.output;
+        
+        // If the result is a string, try to parse it as JSON
+        if (typeof result === 'string') {
+          try {
+            const jsonMatch = result.match(/```json\n([\s\S]*?)\n```/) || result.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              result = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+            }
+          } catch (e) {
+            console.warn("Failed to parse agent output as JSON:", result);
           }
-        } catch (e) {
-          console.warn("Failed to parse agent output as JSON:", result);
         }
-      }
 
-      res.json({
-        ...result,
-        source: "agent_engine"
-      });
+        res.json({
+          ...result,
+          source: "agent_engine"
+        });
+      } catch (unaryError: any) {
+        console.warn("Unary route query failed, throwing original error:", unaryError.message);
+        throw unaryError;
+      }
     } catch (error: any) {
       let errorMessage = error.message;
       let hint = "";
@@ -583,73 +549,25 @@ async function startServer() {
       }
       (req as any).currentIdentity = currentIdentity;
 
-      // Try using the experimental VertexClient first as it might have better compatibility
-      try {
-        const vertexClient = new VertexClient({ project, location });
-        const name = `projects/${project}/locations/${location}/reasoningEngines/${reasoningEngineId}`;
-        
-        // If the method is stream_query, use the streaming endpoint
-        if (classMethod === "stream_query" || classMethod === "async_stream_query") {
-          console.log(`Attempting streaming chat via experimental VertexClient using method ${classMethod}...`);
-          const stream = await (vertexClient as any).agentEnginesInternal.streamQueryInternal({
-            name,
-            config: {
-              input: { 
-                message: message,
-                user_id: (req as any).currentIdentity || "anonymous-user"
-              },
-              classMethod: classMethod
-            }
-          });
-
-          let fullOutput = "";
-          for await (const chunk of stream) {
-            if (chunk.output) fullOutput += chunk.output;
-          }
-
-          console.log("Reasoning Engine chat response received via streaming VertexClient.");
-          return res.json({
-            output: fullOutput,
-            source: "agent_engine_experimental_stream"
-          });
-        }
-
-        console.log(`Attempting query via experimental VertexClient using method ${classMethod}...`);
-        const response = await (vertexClient as any).agentEnginesInternal.queryInternal({
-          name,
-          config: {
-            input: { input: message },
-            classMethod: classMethod
-          }
-        });
-
-        console.log("Reasoning Engine chat response received via VertexClient.");
-        return res.json({
-          output: response.output,
-          source: "agent_engine_experimental"
-        });
-      } catch (experimentalError: any) {
-        console.warn("Experimental VertexClient failed, falling back to standard client:", experimentalError.message);
-        
-        // If it's a "method not found" error, we should report it clearly
-        if (experimentalError.message.includes("method `query` not found")) {
-           throw experimentalError; 
-        }
-      }
-
-      const client = new ReasoningEngineExecutionServiceClient(clientConfig);
       const name = `projects/${project}/locations/${location}/reasoningEngines/${reasoningEngineId}`;
+      const userId = (req as any).currentIdentity || `user_${Date.now()}`;
 
-      // If the method is stream_query, use the streaming endpoint
+      // Handle ADK-style streaming agents
       if (classMethod === "stream_query" || classMethod === "async_stream_query") {
-        console.log(`Attempting streaming chat via standard client using method ${classMethod}...`);
+        const client = new ReasoningEngineExecutionServiceClient(clientConfig);
+        
+        // 1. Ensure we have a session
+        const sessionId = await getOrCreateAgentSession(client, name, userId);
+
+        // 2. Execute streaming query
+        console.log(`Attempting streaming chat via standard client for session ${sessionId}...`);
         const stream = (client as any).streamQueryReasoningEngine({
           name,
           input: {
-            message: message,
-            user_id: (req as any).currentIdentity || "anonymous-user"
-          },
-          classMethod: classMethod
+            user_id: userId,
+            session_id: sessionId,
+            message: message
+          }
         });
 
         let fullOutput = "";
@@ -657,26 +575,33 @@ async function startServer() {
           if (chunk.output) fullOutput += chunk.output;
         }
 
-        console.log("Reasoning Engine chat response received via streaming standard client.");
+        console.log("Reasoning Engine chat response received via streaming.");
         return res.json({
           output: fullOutput,
           source: "agent_engine_stream"
         });
       }
 
-      const [response] = await (client as any).queryReasoningEngine({
-        name,
-        input: {
-          input: message
-        },
-        classMethod: classMethod
-      });
+      // Fallback to unary query for non-streaming agents
+      try {
+        const client = new ReasoningEngineExecutionServiceClient(clientConfig);
+        const [response] = await (client as any).queryReasoningEngine({
+          name,
+          input: {
+            input: message
+          },
+          classMethod: classMethod
+        });
 
-      console.log("Reasoning Engine chat response received successfully.");
-      res.json({
-        output: response.output,
-        source: "agent_engine"
-      });
+        console.log("Reasoning Engine chat response received successfully.");
+        res.json({
+          output: response.output,
+          source: "agent_engine"
+        });
+      } catch (unaryError: any) {
+        console.warn("Unary chat query failed, throwing original error:", unaryError.message);
+        throw unaryError;
+      }
     } catch (error: any) {
       let errorMessage = error.message;
       let hint = "";
