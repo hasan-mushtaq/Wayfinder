@@ -469,17 +469,31 @@ async function startServer() {
         });
 
         let fullOutput = "";
+        let chunkCount = 0;
+        
         for await (const chunk of stream) {
-          // Unpack Protobuf IValue stream chunks
-          if (typeof chunk.output === 'string') {
-            fullOutput += chunk.output;
+          chunkCount++;
+          
+          // Log the exact structure of the very first chunk so we stop guessing!
+          if (chunkCount === 1) {
+            console.log("DEBUG FIRST CHUNK:", JSON.stringify(chunk));
+          }
+
+          // Omni-Unwrapper: Check every known Protobuf/JSON path for the text
+          if (typeof chunk === 'string') {
+            fullOutput += chunk;
+          } else if (chunk.stringValue) {
+            fullOutput += chunk.stringValue; // The most likely location for ADK streams
           } else if (chunk.output?.stringValue) {
             fullOutput += chunk.output.stringValue;
-          } else if (chunk.output?.structValue?.fields) {
-             // In case the agent yields a JSON object instead of raw text
-             console.log("Stream yielded an object:", JSON.stringify(chunk.output));
+          } else if (typeof chunk.output === 'string') {
+            fullOutput += chunk.output;
+          } else if (chunk.text) {
+            fullOutput += chunk.text;
           }
         }
+        
+        console.log(`Stream complete. Received ${chunkCount} chunks. Total text length: ${fullOutput.length}`);
 
         console.log("Reasoning Engine route response received via streaming.");
         let result = fullOutput;
@@ -648,17 +662,31 @@ async function startServer() {
         });
 
         let fullOutput = "";
+        let chunkCount = 0;
+        
         for await (const chunk of stream) {
-          // Unpack Protobuf IValue stream chunks
-          if (typeof chunk.output === 'string') {
-            fullOutput += chunk.output;
+          chunkCount++;
+          
+          // Log the exact structure of the very first chunk so we stop guessing!
+          if (chunkCount === 1) {
+            console.log("DEBUG FIRST CHUNK:", JSON.stringify(chunk));
+          }
+
+          // Omni-Unwrapper: Check every known Protobuf/JSON path for the text
+          if (typeof chunk === 'string') {
+            fullOutput += chunk;
+          } else if (chunk.stringValue) {
+            fullOutput += chunk.stringValue; // The most likely location for ADK streams
           } else if (chunk.output?.stringValue) {
             fullOutput += chunk.output.stringValue;
-          } else if (chunk.output?.structValue?.fields) {
-             // In case the agent yields a JSON object instead of raw text
-             console.log("Stream yielded an object:", JSON.stringify(chunk.output));
+          } else if (typeof chunk.output === 'string') {
+            fullOutput += chunk.output;
+          } else if (chunk.text) {
+            fullOutput += chunk.text;
           }
         }
+        
+        console.log(`Stream complete. Received ${chunkCount} chunks. Total text length: ${fullOutput.length}`);
 
         console.log("Reasoning Engine chat response received via streaming.");
         return {
