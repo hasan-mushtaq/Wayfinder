@@ -88,12 +88,22 @@ async function getOrCreateAgentSession(name: string, userId: string, project: st
   console.log(`Creating new session for user ${userId} on agent ${name}...`);
   
   // Use VertexClient for session creation as it handles the payload structure more explicitly
-  const vertexClient = new VertexClient({ project, location });
-  const response = await (vertexClient as any).agentEnginesInternal.queryInternal({
-    name,
-    input: { user_id: userId },
-    class_method: "create_session"
+// Use the standard Execution Client instead of VertexClient
+  const client = new ReasoningEngineExecutionServiceClient({
+    apiEndpoint: `${location}-aiplatform.googleapis.com`,
+    projectId: project,
   });
+
+  // Bypass TS Promise bug with (await ...) as any, and use Protobuf 'fields' format
+  const [response] = (await client.queryReasoningEngine({
+    name: name,
+    classMethod: "create_session",
+    input: { 
+      fields: {
+        user_id: { stringValue: userId }
+      }
+    }
+  })) as any;
 
   let output = response.output;
   if (typeof output === 'string') {
@@ -107,8 +117,7 @@ async function getOrCreateAgentSession(name: string, userId: string, project: st
     }
   }
 
-  const sessionId = output?.id || response.id;
-  if (!sessionId) {
+  const sessionId = (output as any)?.id || (response as any).id;  if (!sessionId) {
     throw new Error("Failed to create agent session: No session ID returned");
   }
 
@@ -428,13 +437,16 @@ async function startServer() {
         const sessionId = await getOrCreateAgentSession(name, userId, project, location);
 
         // 2. Execute streaming query
+        // 2. Execute streaming query
         console.log(`Attempting streaming query via standard client for session ${sessionId}...`);
-        const stream = (client as any).streamQueryReasoningEngine({
-          name,
+        const stream = client.streamQueryReasoningEngine({
+          name: name,
           input: {
-            user_id: userId,
-            session_id: sessionId,
-            message: inputPayload.message
+            fields: {
+              user_id: { stringValue: userId },
+              session_id: { stringValue: sessionId },
+              message: { stringValue: inputPayload.message }
+            }
           }
         });
 
@@ -596,13 +608,16 @@ async function startServer() {
         const sessionId = await getOrCreateAgentSession(name, userId, project, location);
 
         // 2. Execute streaming query
+        // 2. Execute streaming chat
         console.log(`Attempting streaming chat via standard client for session ${sessionId}...`);
-        const stream = (client as any).streamQueryReasoningEngine({
-          name,
+        const stream = client.streamQueryReasoningEngine({
+          name: name,
           input: {
-            user_id: userId,
-            session_id: sessionId,
-            message: message
+            fields: {
+              user_id: { stringValue: userId },
+              session_id: { stringValue: sessionId },
+              message: { stringValue: message }
+            }
           }
         });
 
