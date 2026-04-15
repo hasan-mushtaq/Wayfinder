@@ -79,17 +79,20 @@ process.on("uncaughtException", (error: any) => {
 // --- Reasoning Engine Session Management ---
 const agentSessions: Record<string, string> = {};
 
-async function getOrCreateAgentSession(client: any, name: string, userId: string): Promise<string> {
+async function getOrCreateAgentSession(name: string, userId: string, project: string, location: string): Promise<string> {
   const sessionKey = `${name}:${userId}`;
   if (agentSessions[sessionKey]) {
     return agentSessions[sessionKey];
   }
 
   console.log(`Creating new session for user ${userId} on agent ${name}...`);
-  const [response] = await client.queryReasoningEngine({
+  
+  // Use VertexClient for session creation as it handles the payload structure more explicitly
+  const vertexClient = new VertexClient({ project, location });
+  const response = await (vertexClient as any).agentEnginesInternal.queryInternal({
     name,
     input: { user_id: userId },
-    classMethod: "create_session"
+    class_method: "create_session"
   });
 
   let output = response.output;
@@ -413,7 +416,7 @@ async function startServer() {
       (req as any).currentIdentity = currentIdentity;
 
       const inputPayload = { 
-        input: `Find the shortest route from node ${startNodeId} to node ${endNodeId}. Return the route as a JSON object with 'nodes' and 'coordinates' fields compatible with the existing routing API.` 
+        message: `Find the shortest route from node ${startNodeId} to node ${endNodeId}. Return the route as a JSON object with 'nodes' and 'coordinates' fields compatible with the existing routing API.` 
       };
 
       const name = `projects/${project}/locations/${location}/reasoningEngines/${reasoningEngineId}`;
@@ -422,7 +425,7 @@ async function startServer() {
       // Helper for streaming execution
       const executeStreaming = async (client: any) => {
         // 1. Ensure we have a session
-        const sessionId = await getOrCreateAgentSession(client, name, userId);
+        const sessionId = await getOrCreateAgentSession(name, userId, project, location);
 
         // 2. Execute streaming query
         console.log(`Attempting streaming query via standard client for session ${sessionId}...`);
@@ -431,7 +434,7 @@ async function startServer() {
           input: {
             user_id: userId,
             session_id: sessionId,
-            message: inputPayload.input
+            message: inputPayload.message
           }
         });
 
@@ -469,7 +472,7 @@ async function startServer() {
         const [response] = await (client as any).queryReasoningEngine({
           name,
           input: inputPayload,
-          classMethod: classMethod
+          class_method: classMethod
         });
 
         console.log("Reasoning Engine route response received successfully.");
@@ -586,7 +589,7 @@ async function startServer() {
       // Helper for streaming execution
       const executeStreaming = async (client: any) => {
         // 1. Ensure we have a session
-        const sessionId = await getOrCreateAgentSession(client, name, userId);
+        const sessionId = await getOrCreateAgentSession(name, userId, project, location);
 
         // 2. Execute streaming query
         console.log(`Attempting streaming chat via standard client for session ${sessionId}...`);
@@ -624,9 +627,9 @@ async function startServer() {
         const [response] = await (client as any).queryReasoningEngine({
           name,
           input: {
-            input: message
+            message: message
           },
-          classMethod: classMethod
+          class_method: classMethod
         });
 
         console.log("Reasoning Engine chat response received successfully.");
