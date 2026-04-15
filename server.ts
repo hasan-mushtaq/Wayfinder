@@ -105,21 +105,39 @@ async function getOrCreateAgentSession(name: string, userId: string, project: st
     }
   })) as any;
 
-  let output = response.output;
-  if (typeof output === 'string') {
-    try {
-      const jsonMatch = output.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        output = JSON.parse(jsonMatch[0]);
-      }
-    } catch (e) {
-      console.warn("Failed to parse create_session output as JSON:", output);
+  // --- PROTOBUF UNWRAPPING LOGIC ---
+  let sessionId = null;
+  const output = response.output;
+
+  if (output) {
+    // 1. Handle Protobuf Struct (gRPC SDK behavior)
+    if (output.structValue?.fields?.id?.stringValue) {
+      sessionId = output.structValue.fields.id.stringValue;
+    }
+    // 2. Handle plain object (REST fallback)
+    else if (output.id) {
+      sessionId = output.id;
+    }
+    // 3. Handle stringified JSON
+    else if (typeof output === 'string') {
+      try {
+        const parsed = JSON.parse(output.match(/\{[\s\S]*\}/)?.[0] || output);
+        sessionId = parsed?.id;
+      } catch (e) {}
     }
   }
 
-  const sessionId = (output as any)?.id || (response as any).id;  if (!sessionId) {
-    throw new Error("Failed to create agent session: No session ID returned");
+  // 4. Ultimate fallback to raw response
+  if (!sessionId && (response as any).id) {
+    sessionId = (response as any).id;
   }
+
+  if (!sessionId) {
+    // Log the raw structure so we can inspect it if it fails again
+    console.error("RAW GRPC RESPONSE:", JSON.stringify(response, null, 2));
+    throw new Error("Failed to create agent session: No session ID found in Protobuf struct.");
+  }
+  // ---------------------------------
 
   agentSessions[sessionKey] = sessionId;
   console.log(`Session created: ${sessionId}`);
@@ -452,7 +470,15 @@ async function startServer() {
 
         let fullOutput = "";
         for await (const chunk of stream) {
-          if (chunk.output) fullOutput += chunk.output;
+          // Unpack Protobuf IValue stream chunks
+          if (typeof chunk.output === 'string') {
+            fullOutput += chunk.output;
+          } else if (chunk.output?.stringValue) {
+            fullOutput += chunk.output.stringValue;
+          } else if (chunk.output?.structValue?.fields) {
+             // In case the agent yields a JSON object instead of raw text
+             console.log("Stream yielded an object:", JSON.stringify(chunk.output));
+          }
         }
 
         console.log("Reasoning Engine route response received via streaming.");
@@ -623,7 +649,15 @@ async function startServer() {
 
         let fullOutput = "";
         for await (const chunk of stream) {
-          if (chunk.output) fullOutput += chunk.output;
+          // Unpack Protobuf IValue stream chunks
+          if (typeof chunk.output === 'string') {
+            fullOutput += chunk.output;
+          } else if (chunk.output?.stringValue) {
+            fullOutput += chunk.output.stringValue;
+          } else if (chunk.output?.structValue?.fields) {
+             // In case the agent yields a JSON object instead of raw text
+             console.log("Stream yielded an object:", JSON.stringify(chunk.output));
+          }
         }
 
         console.log("Reasoning Engine chat response received via streaming.");
