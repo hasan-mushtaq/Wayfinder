@@ -470,30 +470,36 @@ async function startServer() {
 
         let fullOutput = "";
         let chunkCount = 0;
-        
+
         for await (const chunk of stream) {
           chunkCount++;
-          
-          // Log the exact structure of the very first chunk so we stop guessing!
-          if (chunkCount === 1) {
-            console.log("DEBUG FIRST CHUNK:", JSON.stringify(chunk));
+          let rawText = "";
+
+          // THE FIX: gRPC HttpBody payloads hide the stream inside 'data' as a Buffer
+          if (chunk.data) {
+            rawText = Buffer.isBuffer(chunk.data) || chunk.data instanceof Uint8Array
+              ? Buffer.from(chunk.data).toString('utf8')
+              : String(chunk.data);
+          } 
+          // Fallbacks just in case the SDK formats it differently
+          else if (typeof chunk === 'string') {
+            rawText = chunk;
+          } else if (chunk.stringValue) {
+            rawText = chunk.stringValue;
+          } else if (chunk.output?.stringValue) {
+            rawText = chunk.output.stringValue;
           }
 
-          // Omni-Unwrapper: Check every known Protobuf/JSON path for the text
-          if (typeof chunk === 'string') {
-            fullOutput += chunk;
-          } else if (chunk.stringValue) {
-            fullOutput += chunk.stringValue; // The most likely location for ADK streams
-          } else if (chunk.output?.stringValue) {
-            fullOutput += chunk.output.stringValue;
-          } else if (typeof chunk.output === 'string') {
-            fullOutput += chunk.output;
-          } else if (chunk.text) {
-            fullOutput += chunk.text;
+          if (rawText) {
+            fullOutput += rawText;
           }
         }
-        
+
         console.log(`Stream complete. Received ${chunkCount} chunks. Total text length: ${fullOutput.length}`);
+        
+        // Let's print the first 250 characters of the decoded text so we can see exactly 
+        // how the ADK agent formats its response (e.g., raw text vs Server-Sent Events)
+        console.log("RAW DECODED TEXT PREVIEW:", fullOutput.substring(0, 250));
 
         console.log("Reasoning Engine route response received via streaming.");
         let result = fullOutput;
@@ -663,30 +669,36 @@ async function startServer() {
 
         let fullOutput = "";
         let chunkCount = 0;
-        
+
         for await (const chunk of stream) {
           chunkCount++;
-          
-          // Log the exact structure of the very first chunk so we stop guessing!
-          if (chunkCount === 1) {
-            console.log("DEBUG FIRST CHUNK:", JSON.stringify(chunk));
+          let rawText = "";
+
+          // THE FIX: gRPC HttpBody payloads hide the stream inside 'data' as a Buffer
+          if (chunk.data) {
+            rawText = Buffer.isBuffer(chunk.data) || chunk.data instanceof Uint8Array
+              ? Buffer.from(chunk.data).toString('utf8')
+              : String(chunk.data);
+          } 
+          // Fallbacks just in case the SDK formats it differently
+          else if (typeof chunk === 'string') {
+            rawText = chunk;
+          } else if (chunk.stringValue) {
+            rawText = chunk.stringValue;
+          } else if (chunk.output?.stringValue) {
+            rawText = chunk.output.stringValue;
           }
 
-          // Omni-Unwrapper: Check every known Protobuf/JSON path for the text
-          if (typeof chunk === 'string') {
-            fullOutput += chunk;
-          } else if (chunk.stringValue) {
-            fullOutput += chunk.stringValue; // The most likely location for ADK streams
-          } else if (chunk.output?.stringValue) {
-            fullOutput += chunk.output.stringValue;
-          } else if (typeof chunk.output === 'string') {
-            fullOutput += chunk.output;
-          } else if (chunk.text) {
-            fullOutput += chunk.text;
+          if (rawText) {
+            fullOutput += rawText;
           }
         }
-        
+
         console.log(`Stream complete. Received ${chunkCount} chunks. Total text length: ${fullOutput.length}`);
+        
+        // Let's print the first 250 characters of the decoded text so we can see exactly 
+        // how the ADK agent formats its response (e.g., raw text vs Server-Sent Events)
+        console.log("RAW DECODED TEXT PREVIEW:", fullOutput.substring(0, 250));
 
         console.log("Reasoning Engine chat response received via streaming.");
         return {
