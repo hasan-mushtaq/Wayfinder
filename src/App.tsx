@@ -828,7 +828,23 @@ RETURN
                   Detected Methods:
                 </div>
                 <div className="flex flex-wrap gap-1">
-                  {agentHints.split(', ').map(method => (
+                  {/* Add virtual streaming methods if create_session is present */}
+                  {(agentHints.includes('create_session') && !agentHints.includes('stream_query')) && (
+                    <>
+                      <button 
+                        onClick={() => setAgentMethod('stream_query')}
+                        className={`px-1.5 py-0.5 rounded border transition-colors font-bold ${
+                          agentMethod === 'stream_query' 
+                            ? 'bg-green-600 border-green-600 text-white' 
+                            : 'bg-green-50 border-green-100 text-green-700 hover:bg-green-100'
+                        }`}
+                        title="ADK Streaming Mode"
+                      >
+                        stream_query (ADK)
+                      </button>
+                    </>
+                  )}
+                  {agentHints.split(', ').filter(m => m !== 'None found in spec').map(method => (
                     <button 
                       key={method}
                       onClick={() => setAgentMethod(method)}
