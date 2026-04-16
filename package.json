@@ -16,6 +16,7 @@
     "@google-cloud/spanner": "^8.6.0",
     "@google-cloud/vertexai": "^1.11.0",
     "@google/genai": "^1.29.0",
+    "@google/generative-ai": "^0.24.1",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "cors": "^2.8.6",
