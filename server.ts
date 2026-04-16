@@ -17,9 +17,13 @@ const __dirname = path.dirname(__filename);
 
 // --- Helper: Rephrase Route with Gemini ---
 async function rephraseRoute(rawSteps: string): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
-    console.log("Gemini API Key not configured or placeholder used, skipping rephrasing.");
+  // Use the provided key by default, but allow override via environment variable
+  const platformKey = process.env.GEMINI_API_KEY;
+  const defaultKey = "AIzaSyCxYfg4KhiyazF5IwaPXXpqZqKYCEvA6kg";
+  const apiKey = (platformKey && platformKey !== "MY_GEMINI_API_KEY") ? platformKey : defaultKey;
+  
+  if (!apiKey) {
+    console.log("No Gemini API Key available, skipping rephrasing.");
     return rawSteps;
   }
 
