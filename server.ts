@@ -94,39 +94,6 @@ function getLevelsSync() {
   return [];
 }
 
-// --- Helper: Extract Coordinates and Nodes from Spanner Graph result ---
-function extractCoordinatesAndNodes(routeData: any) {
-  if (!routeData) return { nodes: [], coordinates: [] };
-
-  const routeNodes = routeData.route_nodes || routeData.nodes || [];
-  const coordinates = routeNodes.map((node: any) => {
-    const props = node.properties || {};
-    const geom = props.geom || props.geom_geojson;
-    
-    if (geom) {
-      try {
-        // Handle both WKT and GeoJSON
-        if (typeof geom === 'string' && (geom.startsWith('POINT') || geom.startsWith('point'))) {
-          const geometry = (wellknown as any).parse(geom);
-          if (geometry && geometry.type === 'Point') {
-            return geometry.coordinates;
-          }
-        } else {
-          const geometry = typeof geom === 'string' ? JSON.parse(geom) : geom;
-          if (geometry && geometry.coordinates) {
-            return geometry.coordinates;
-          }
-        }
-      } catch (e) {
-        console.warn("Failed to parse geometry:", geom);
-      }
-    }
-    return null;
-  }).filter((c: any) => c !== null);
-
-  return { nodes: routeNodes, coordinates };
-}
-
 // --- Spanner Configuration ---
 // Default to the project where the database is located, but allow override via environment variable.
 const targetProjectId = process.env.SPANNER_PROJECT_ID || "no-genai-live";
@@ -682,14 +649,9 @@ async function startServer() {
         // Clean up any weird formatting characters the agent might include
         humanText = humanText.trim().replace(/\\n/g, '\n');
 
-        const { nodes, coordinates } = extractCoordinatesAndNodes(extractedRouteData);
-
         return {
-          output: humanText || fullOutput,
-          description: humanText,
-          routeData: extractedRouteData,
-          nodes,
-          coordinates,
+          output: humanText || fullOutput, // Fallback to raw if parser finds nothing
+          routeData: extractedRouteData,   // Passes the raw graph JSON to your frontend map
           source: "agent_engine_stream"
         };
       };
@@ -712,46 +674,21 @@ async function startServer() {
 
         console.log("Reasoning Engine route response received successfully.");
         let result = response.output;
-        let humanText = "";
         
         // If the result is a string, try to parse it as JSON
         if (typeof result === 'string') {
           try {
             const jsonMatch = result.match(/```json\n([\s\S]*?)\n```/) || result.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
-              const parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
-              // If it has route data inside
-              if (parsed.nodes || parsed.route_nodes) {
-                const { nodes, coordinates } = extractCoordinatesAndNodes(parsed);
-                return res.json({
-                  ...parsed,
-                  nodes,
-                  coordinates,
-                  description: parsed.description || parsed.output || "",
-                  source: "agent_engine"
-                });
-              }
-              result = parsed;
-            } else {
-              humanText = result;
+              result = JSON.parse(jsonMatch[1] || jsonMatch[0]);
             }
           } catch (e) {
             console.warn("Failed to parse agent output as JSON:", result);
-            humanText = result;
           }
-        } else if (result && (result.nodes || result.route_nodes)) {
-          const { nodes, coordinates } = extractCoordinatesAndNodes(result);
-          return res.json({
-            ...result,
-            nodes,
-            coordinates,
-            source: "agent_engine"
-          });
         }
 
         res.json({
-          ...(typeof result === 'object' ? result : { output: result }),
-          description: humanText || (result && result.output) || "",
+          ...result,
           source: "agent_engine"
         });
       } catch (unaryError: any) {
@@ -933,14 +870,9 @@ async function startServer() {
         // Clean up any weird formatting characters the agent might include
         humanText = humanText.trim().replace(/\\n/g, '\n');
 
-        const { nodes, coordinates } = extractCoordinatesAndNodes(extractedRouteData);
-
         return {
-          output: humanText || fullOutput,
-          description: humanText,
-          routeData: extractedRouteData,
-          nodes,
-          coordinates,
+          output: humanText || fullOutput, // Fallback to raw if parser finds nothing
+          routeData: extractedRouteData,   // Passes the raw graph JSON to your frontend map
           source: "agent_engine_stream"
         };
       };
@@ -964,44 +896,8 @@ async function startServer() {
         });
 
         console.log("Reasoning Engine chat response received successfully.");
-        let result = response.output;
-        let humanText = "";
-        
-        if (typeof result === 'string') {
-          try {
-            const jsonMatch = result.match(/```json\n([\s\S]*?)\n```/) || result.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-              const parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
-              if (parsed.nodes || parsed.route_nodes) {
-                const { nodes, coordinates } = extractCoordinatesAndNodes(parsed);
-                return res.json({
-                  ...parsed,
-                  nodes,
-                  coordinates,
-                  description: parsed.description || parsed.output || "",
-                  source: "agent_engine"
-                });
-              }
-              result = parsed;
-            } else {
-              humanText = result;
-            }
-          } catch (e) {
-            humanText = result;
-          }
-        } else if (result && (result.nodes || result.route_nodes)) {
-          const { nodes, coordinates } = extractCoordinatesAndNodes(result);
-          return res.json({
-            ...result,
-            nodes,
-            coordinates,
-            source: "agent_engine"
-          });
-        }
-
         res.json({
-          ...(typeof result === 'object' ? result : { output: result }),
-          description: humanText || (result && result.output) || "",
+          output: response.output,
           source: "agent_engine"
         });
       } catch (unaryError: any) {
