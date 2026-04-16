@@ -36,18 +36,18 @@ async function rephraseRoute(rawSteps: string): Promise<string> {
         temperature: 0.7,
         topP: 0.95,
         topK: 40,
-        maxOutputTokens: 1024,
+        maxOutputTokens: 4096,
       }
     });
 
-    const prompt = `You are an elite concierge at a luxury venue. Your goal is to guide a guest through the building using the following navigation steps.
+    const prompt = `You are an elite concierge at a luxury venue. Your goal is to guide a guest through the building using the following navigation data.
 
 Make the directions sound professional, natural, and inviting. 
 
 CONSTRAINTS:
 - DO NOT use the phrase "pass through" more than once. Use words like "head into", "continue towards", "cross", "proceed to", or "move through".
 - Group adjacent locations together (e.g., "Walk through the successive pedestrian zones").
-- Be concise but helpful.
+- Be concise but complete. Ensure the directions lead all the way to the final destination mentioned in the raw data.
 - Mention floor changes (up/down) clearly.
 
 Raw Navigation Data:
@@ -57,6 +57,8 @@ Your Human-Friendly Navigation Guide:`;
 
     const result = await model.generateContent(prompt);
     const text = result.response.text().trim();
+    console.log("Gemini Rephrase Result Length:", text.length);
+    console.log("Full Rephrased Text:", text);
     
     if (text) {
       console.log("Successfully rephrased route.");
