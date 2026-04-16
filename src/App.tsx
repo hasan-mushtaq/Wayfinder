@@ -486,6 +486,7 @@ RETURN
               }
 
               const data = await response.json();
+              console.log("Routing response data:", data);
               
               if (data.coordinates && data.coordinates.length > 0) {
                 // Convert [lng, lat] to {lat, lng} for Google Maps
@@ -555,7 +556,9 @@ RETURN
 
                 setMessages(prev => [...prev, {
                   id: Date.now().toString(),
-                  text: `Route found (${data.nodes.length} steps) via ${isAgent ? 'Agent' : 'Direct GQL'}! ${instructionText}`,
+                  text: data.description 
+                    ? `Great news! I've found a route (${data.nodes.length} steps) via ${isAgent ? 'Agent' : 'Direct GQL'}. ${instructionText}`
+                    : `Route found (${data.nodes.length} steps) via ${isAgent ? 'Agent' : 'Direct GQL'}! ${instructionText}`,
                   sender: 'ai',
                   details: detailsText
                 }]);
