@@ -10,9 +10,63 @@ import { GoogleAuth } from "google-auth-library";
 import { Client as VertexClient } from "@google-cloud/vertexai";
 import cors from "cors";
 import wellknown from "wellknown";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// --- Helper: Rephrase Route with Gemini ---
+async function rephraseRoute(rawSteps: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
+    console.log("Gemini API Key not configured, skipping rephrasing.");
+    return rawSteps;
+  }
+
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+
+    const prompt = `Rephrase the following indoor navigation route into a natural, human-friendly summary. 
+Avoid repeating "pass through" too many times. Use descriptive language and transition words to make it flow better.
+Make it sound like a friendly assistant giving directions.
+Keep it concise but helpful.
+
+Raw Route: ${rawSteps}
+
+Human-friendly summary:`;
+
+    const result = await model.generateContent(prompt);
+    const text = result.response.text().trim();
+    return text || rawSteps;
+  } catch (err) {
+    console.error("Error rephrasing route with Gemini:", err);
+    return rawSteps;
+  }
+}
+
+// --- Helper: Get Floor Levels ---
+function getLevelsSync() {
+  try {
+    const geojsonDir = path.join(__dirname, "src", "data", "geojson");
+    const levelFilePath = path.join(geojsonDir, "level.geojson");
+    if (fs.existsSync(levelFilePath)) {
+      const content = fs.readFileSync(levelFilePath, "utf8");
+      const geojson = JSON.parse(content);
+      if (geojson.features) {
+        return geojson.features.map((f: any) => ({
+          id: f.id,
+          name: f.properties.name?.en || f.properties.name || "Unnamed Level",
+          short_name: f.properties.short_name?.en || f.properties.short_name || "",
+          ordinal: f.properties.ordinal ?? 0
+        })).sort((a: any, b: any) => a.ordinal - b.ordinal);
+      }
+    }
+  } catch (e) {
+    console.warn("Error reading levels in backend:", e);
+  }
+  return [];
+}
 
 // --- Spanner Configuration ---
 // Default to the project where the database is located, but allow override via environment variable.
@@ -313,26 +367,8 @@ async function startServer() {
   // --- API Endpoint: Get Levels ---
   app.get("/api/levels", async (req, res) => {
     try {
-      const geojsonDir = path.join(__dirname, "src", "data", "geojson");
-      const levelFilePath = path.join(geojsonDir, "level.geojson");
-      
-      if (fs.existsSync(levelFilePath)) {
-        const content = fs.readFileSync(levelFilePath, "utf8");
-        const geojson = JSON.parse(content);
-        
-        if (geojson.features) {
-          const levels = geojson.features.map((f: any) => ({
-            id: f.id,
-            name: f.properties.name?.en || f.properties.name || "Unnamed Level",
-            short_name: f.properties.short_name?.en || f.properties.short_name || "",
-            ordinal: f.properties.ordinal ?? 0
-          })).sort((a: any, b: any) => a.ordinal - b.ordinal);
-          
-          return res.json(levels);
-        }
-      }
-      
-      res.json([]);
+      const levels = getLevelsSync();
+      res.json(levels);
     } catch (error: any) {
       console.error("Error in /api/levels:", error.message);
       res.status(500).json({ error: error.message });
@@ -394,10 +430,61 @@ async function startServer() {
         return null;
       }).filter((c: any) => c !== null);
 
+      // Generate descriptive instructions for rephrasing
+      const levels = getLevelsSync();
+      const steps: string[] = [];
+      routeNodes.forEach((node: any, index: number) => {
+        const props = node.properties || {};
+        const name = props.name || (props.category ? props.category.replace(/\./g, ' ') : props.node_type);
+        const capitalized = typeof name === 'string' ? (name.charAt(0).toUpperCase() + name.slice(1)) : 'Point';
+        const category = (props.category || '').toLowerCase();
+        const levelId = props.level_id || props.levelId || props.floor_number;
+
+        if (index > 0) {
+          const prevNode = routeNodes[index - 1];
+          const prevProps = prevNode.properties || {};
+          const prevLevelId = prevProps.level_id || prevProps.levelId || prevProps.floor_number;
+
+          if (prevLevelId && levelId && String(prevLevelId) !== String(levelId)) {
+            const currentLevel = levels.find(l => String(l.id) === String(levelId) || String(l.ordinal) === String(levelId));
+            const prevLevel = levels.find(l => String(l.id) === String(prevLevelId) || String(l.ordinal) === String(prevLevelId));
+            
+            if (currentLevel && prevLevel) {
+              const direction = currentLevel.ordinal > prevLevel.ordinal ? 'up' : 'down';
+              let facility = 'stairs/elevator';
+              const combinedCategory = (category + ' ' + (prevProps.category || '').toLowerCase());
+              if (combinedCategory.includes('elevator')) facility = 'elevator';
+              else if (combinedCategory.includes('escalator')) facility = 'escalator';
+              else if (combinedCategory.includes('stairs') || combinedCategory.includes('steps')) facility = 'stairs';
+              steps.push(`take the ${facility} ${direction} to ${currentLevel.name}`);
+            }
+          }
+        }
+
+        let stepText = '';
+        if (index === 0) stepText = `Start at ${capitalized}`;
+        else if (index === routeNodes.length - 1) stepText = `arrive at ${capitalized}`;
+        else {
+          const isFacility = category.includes('elevator') || category.includes('escalator') || category.includes('stairs') || category.includes('steps');
+          stepText = isFacility ? `pass through the ${name.toLowerCase()} area` : `pass through ${capitalized}`;
+        }
+
+        if (steps.length === 0 || steps[steps.length - 1] !== stepText) {
+          steps.push(stepText);
+        }
+      });
+
+      const rawDescription = steps.length > 1 
+        ? `${steps.slice(0, -1).join(', ')}, and finally ${steps[steps.length - 1]}.`
+        : `You are already at your destination.`;
+
+      const finalDescription = await rephraseRoute(rawDescription);
+
       res.json({
         nodes: routeNodes,
         coordinates: coordinates,
-        source: "spanner_graph"
+        source: "spanner_graph",
+        description: finalDescription
       });
     } catch (error: any) {
       console.error("Error in /api/route:", error.message);
