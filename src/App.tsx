@@ -545,9 +545,9 @@ RETURN
                   }
                 });
 
-                const instructionText = steps.length > 1 
+                const instructionText = data.description || (steps.length > 1 
                   ? `${steps.slice(0, -1).join(', ')}, and finally ${steps[steps.length - 1]}.`
-                  : `You are already at your destination.`;
+                  : `You are already at your destination.`);
                 
                 const detailsText = isAgent
                   ? `--- AGENT RESPONSE ---\n${JSON.stringify(data, null, 2)}`
