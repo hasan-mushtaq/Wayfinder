@@ -19,26 +19,46 @@ const __dirname = path.dirname(__filename);
 async function rephraseRoute(rawSteps: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
-    console.log("Gemini API Key not configured, skipping rephrasing.");
+    console.log("Gemini API Key not configured or placeholder used, skipping rephrasing.");
     return rawSteps;
   }
 
   try {
+    console.log("Rephrasing route with Gemini...");
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-2.0-flash",
+      generationConfig: {
+        temperature: 0.7,
+        topP: 0.95,
+        topK: 40,
+        maxOutputTokens: 1024,
+      }
+    });
 
-    const prompt = `Rephrase the following indoor navigation route into a natural, human-friendly summary. 
-Avoid repeating "pass through" too many times. Use descriptive language and transition words to make it flow better.
-Make it sound like a friendly assistant giving directions.
-Keep it concise but helpful.
+    const prompt = `You are an elite concierge at a luxury venue. Your goal is to guide a guest through the building using the following navigation steps.
 
-Raw Route: ${rawSteps}
+Make the directions sound professional, natural, and inviting. 
 
-Human-friendly summary:`;
+CONSTRAINTS:
+- DO NOT use the phrase "pass through" more than once. Use words like "head into", "continue towards", "cross", "proceed to", or "move through".
+- Group adjacent locations together (e.g., "Walk through the successive pedestrian zones").
+- Be concise but helpful.
+- Mention floor changes (up/down) clearly.
+
+Raw Navigation Data:
+${rawSteps}
+
+Your Human-Friendly Navigation Guide:`;
 
     const result = await model.generateContent(prompt);
     const text = result.response.text().trim();
-    return text || rawSteps;
+    
+    if (text) {
+      console.log("Successfully rephrased route.");
+      return text;
+    }
+    return rawSteps;
   } catch (err) {
     console.error("Error rephrasing route with Gemini:", err);
     return rawSteps;
